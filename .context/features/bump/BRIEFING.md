@@ -1,6 +1,6 @@
 # Summerhacks — Bump context (flattened)
 
-Copy/paste briefing for future agents and humans. Source of truth also lives in `.context/features/bump/spec.yaml` and `docs/bump/*` + `docs/deploy-vercel.md`.
+Copy/paste briefing for future agents and humans. Keep in sync with `spec.yaml` and `docs/bump/*` + `docs/deploy-vercel.md`.
 
 ---
 
@@ -11,6 +11,19 @@ Photo-sharing direction long-term; **MVP is Bump only** (not full feed, not coll
 **Bump:** two users enter explicit **Bump Mode**, shake (accelerometer), server pairs them by **time + coarse IP geo**, opens a **durable shared session** they can reopen later **without bumping again**.
 
 **Canvas / WebSockets:** deferred. Same `sessionId` will become the realtime room later (PartyKit / Ably / Fly — not long-lived WS on Vercel serverless).
+
+---
+
+## How it works (remember this flow)
+
+1. Bootstrap display name → token = user id (`localStorage`)
+2. Enter Bump Mode → motion permission on gesture (no GPS)
+3. Accel peak (threshold ~16) or Simulate → `POST /api/bumps` (+ IP geo)
+4. Match within ±2s server time + place; create session `pending_confirm`
+5. Poll `GET /api/bumps/:id` (~500ms) until matched/expired
+6. Both users confirm → session `active` → navigate `/session/:id`
+
+**Correctness = matched → confirm → same sessionId.** Haptics alone do not prove a match.
 
 ---
 
@@ -43,12 +56,14 @@ Frontend calls **same-origin** `fetch('/api' + path)` — no separate API host o
 
 ## Matching rules (remember these)
 
+Constants: `MATCH_TIME_WINDOW_MS=2000`, `BUMP_EXPIRY_MS=8000`, `BUMP_POLL_INTERVAL_MS=500`
+
 - **Time window:** ~±2000ms (prefer **server receive time**)
-- **Place:** Vercel IP geo headers (`x-vercel-ip-city/country/region/lat/lng`) — city/region scale, **not GPS**
-- **No browser geolocation prompt** in MVP (GPS optional later; nullable lat/lng reserved)
+- **Place** (any one): same country + (city or region); OR lat/lng Euclidean < 0.5°; OR same IP
+- **No browser geolocation** in MVP (GPS optional later; nullable lat/lng reserved)
 - **Expiry:** ~8000ms unmatched → expired
-- **One-to-one** transactional-ish match; confirm peer before fully active
-- **Accelerometer:** client UX + intent gate; optional `peakMagnitude` on intent
+- **One-to-one** transactional-ish match; **both** members must confirm before `active`
+- **Accelerometer:** client UX + intent gate (threshold ~16); optional `peakMagnitude` on intent
 - Local stub geo via `DEV_GEO_*` so localhost clients can match
 - Neon HTTP driver: cast JS params in match SQL (`::text` / `::float8`) or you get `could not determine data type of parameter $N`
 
@@ -60,6 +75,12 @@ Frontend calls **same-origin** `fetch('/api' + path)` — no separate API host o
 - **Vibration:** no extra permission; `navigator.vibrate` works on **Android Chrome**, **not iOS Safari**
 - On iOS: drive **visual intensity** from accel magnitude; vibrate when available
 - Desktop: **Simulate bump** button required for dev
+
+---
+
+## UI phases (client)
+
+`idle → listening → searching → matched_confirm` (+ `expired` / `error`). Confirm navigates to `/session/:id`.
 
 ---
 
@@ -79,12 +100,12 @@ Frontend calls **same-origin** `fetch('/api' + path)` — no separate API host o
 
 ## API surface
 
+- `GET /api/health` — `{ ok, store: "neon"|"memory" }`
 - `POST /api/users/bootstrap` — `{ displayName, deviceId? }` → `{ user, token }`
 - `POST /api/bumps` — `{ clientTimestamp, peakMagnitude?, idempotencyKey }` → pending/matched
-- `GET /api/bumps/:id` — poll while searching
+- `GET /api/bumps/:id` — poll while searching (also retries match)
 - `DELETE /api/bumps/:id` — leave Bump Mode / cancel
 - `GET /api/sessions`, `GET /api/sessions/:id`, `POST /api/sessions/:id/confirm`
-- `GET /api/health` — `{ ok, store: "neon"|"memory" }`
 
 ---
 
@@ -116,27 +137,27 @@ Preview/Production URL
 1. Create Neon DB (Free) + connection string  
 2. Quote URLs in local `.env`; `set -a && source .env && set +a`  
 3. `npm run db:push -w @summerhacks/api` (use `DATABASE_URL_UNPOOLED` if pooler fails)  
-4. `npx vercel env add DATABASE_URL preview` (and production if used) — **sensitive: Y**, leave branch empty for all Preview  
+4. `npx vercel env add DATABASE_URL preview` (and **production** if demos use prod URL) — **sensitive: Y**, leave branch empty for all Preview  
 5. Redeploy  
 
 **Without `DATABASE_URL` on Vercel:** app may boot, but two phones will **not** match (per-invocation memory).
 
 Local: skip Neon; memory store is OK. Switch = set/unset `DATABASE_URL` (no extra flag). Skip Development env + per-deploy DB branches for MVP.
 
-### Mobile testing
+### Mobile testing / in-person demo
 
-- Disable **Vercel Authentication** (Deployment Protection) for Preview, or use Production (usually public on Hobby).
-- App “Continue” + display name is **bootstrap**, not Vercel login — each phone needs its own user.
-- Correctness = **matched → confirm peer → same `sessionId`**. Haptics alone do not prove match.
+- Prefer Production URL if Preview has Vercel Authentication: `https://summerhacks-ebon.vercel.app`
+- Disable **Vercel Authentication** (Deployment Protection) for Preview if using Preview URLs
+- App “Continue” + display name is **bootstrap**, not Vercel login — each phone needs its own user
+- Shake within ~2s after both are listening; confirm peer on both devices
+- Optional: verify Neon rows (`matched` intents + shared `session_id`)
 
 ### Smoke checks
 
 ```bash
-curl https://<deploy>/api/health          # expect "store":"neon"
+curl https://summerhacks-ebon.vercel.app/api/health          # expect "store":"neon"
 # bootstrap two users, POST /api/bumps within ~2s → second returns matched + sessionId
 ```
-
-Production alias used in bring-up: `https://summerhacks-ebon.vercel.app`
 
 ---
 
@@ -147,6 +168,7 @@ Production alias used in bring-up: `https://summerhacks-ebon.vercel.app`
 .context/features/bump/BRIEFING.md # this flattened briefing
 docs/bump/*                        # human docs + Mermaid
 docs/deploy-vercel.md
+docs/session-2026-08-08-vercel-neon.md
 apps/web/src/features/bump/        # BumpMode, accel, haptics, poll
 apps/web/src/features/session/     # SessionView, RecentSessions
 apps/api/src/routes/               # users, bumps, sessions
@@ -194,5 +216,6 @@ packages/shared                    # constants + Zod schemas
 9. **`api/index.ts` + rewrite**, not Next-style catch-all filenames.  
 10. **Named `GET`/`POST`/… exports** for Hono on Vercel — not default `Response`.  
 11. **Root `"type": "module"`** required for the API function.  
-12. **Confirm step** after match before treating connection as fully trusted/active.  
+12. **Both members confirm** after match before session is `active`.  
 13. **Haptics ≠ correctness**; shared session after confirm does.  
+14. **Quote `&` in Neon URLs** in `.env`; cast Neon match SQL params.  

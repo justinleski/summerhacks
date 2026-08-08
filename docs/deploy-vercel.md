@@ -1,6 +1,6 @@
 # Vercel deployment map
 
-How frontend and backend share one Preview/Production URL when deploying from the repo root with the Vercel CLI.
+How frontend and backend share one Preview/Production URL when deploying from the repo root with the Vercel CLI. Required reading for **two-phone bump** demos.
 
 ## Topology
 
@@ -65,7 +65,7 @@ npx vercel dev
 
 Root `package.json` must keep `"type": "module"`. `api/index.ts` must export named `GET`/`POST`/… (not only a default `Response` handler).
 
-## Neon for Preview (required for two-device bumps)
+## Neon for Preview/Production (required for two-device bumps)
 
 Without `DATABASE_URL` on Vercel, each serverless invocation uses a fresh **in-memory** store — two phones will not match. Local two-tab testing can stay on memory.
 
@@ -73,7 +73,7 @@ Without `DATABASE_URL` on Vercel, each serverless invocation uses a fresh **in-m
 
 1. **Vercel Storage → Neon** (Free plan) **or** create a project at [console.neon.tech](https://console.neon.tech)
 2. Copy the **pooled** connection string (`…-pooler…`, `sslmode=require`)
-3. Put it in local `.env` as `DATABASE_URL` (optional unpooled as `DATABASE_URL_UNPOOLED` for migrations)
+3. Put it in local `.env` as `DATABASE_URL` (optional unpooled as `DATABASE_URL_UNPOOLED` for migrations). **Quote the value** — `&` in query strings breaks `source .env`
 4. Push schema once:
 
 ```bash
@@ -83,14 +83,15 @@ npm run db:push -w @summerhacks/api
 # DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:push -w @summerhacks/api
 ```
 
-5. Add to Vercel (Preview is the important one for device testing):
+5. Add to Vercel (Preview **and** Production if you demo on the production URL):
 
 ```bash
 npx vercel env add DATABASE_URL preview
+npx vercel env add DATABASE_URL production   # if using Production
 # paste pooled URL
 ```
 
-6. Redeploy: `npm run deploy`
+6. Redeploy: `npm run deploy` or `npm run deploy:prod`
 7. Verify: `GET /api/health` → `"store":"neon"`
 
 ### Which Vercel environments?
@@ -98,7 +99,7 @@ npx vercel env add DATABASE_URL preview
 | Environment | Set `DATABASE_URL`? | Notes |
 | --- | --- | --- |
 | **Preview** | **Yes** | Feature / CLI Preview URLs |
-| **Production** | Optional | Only if you use production URL |
+| **Production** | **Yes** if demos use prod URL | Hobby prod is often public without SSO |
 | **Development** | Usually no | Only for `vercel env pull` / `vercel dev` injecting Neon locally |
 
 Skip **DB branch per deployment** for MVP — one shared Neon DB for all Preview deploys is enough.
@@ -110,16 +111,34 @@ Skip **DB branch per deployment** for MVP — one shared Neon DB for all Preview
 | unset | In-memory (`npm run dev`) |
 | set | Neon (same code path as Preview) |
 
-## Mobile Preview access
+## Mobile access
 
-If phones hit a Vercel login wall: Project → **Settings** → **Deployment Protection** → disable **Vercel Authentication** for Preview (or use Production, which is usually public on Hobby).
+If phones hit a Vercel login wall: Project → **Settings** → **Deployment Protection** → disable **Vercel Authentication** for Preview (or use Production).
 
 App “Continue” with a display name is bootstrap identity, not Vercel login — each phone still needs its own name/user so matching can show a peer.
 
-## Two-device smoke test
+Production alias used in bring-up: `https://summerhacks-ebon.vercel.app`
 
-1. Same Preview URL on both devices
+## Two-device smoke test (in person)
+
+1. Open the **same** public URL on both phones (prefer Production if Preview is SSO-gated)
 2. Distinct display names → Continue
-3. Both enter Bump Mode; shake (or Simulate) within ~2s
-4. Expect confirm-peer UI, then same `sessionId` after confirm
-5. Haptics alone do **not** prove a match — confirm + shared session does
+3. Both enter Bump Mode; grant motion on iOS; shake (or Simulate) within ~2s
+4. Expect confirm-peer UI → Confirm → same `/session/:id`
+5. Optional DB check: both `bump_intents` `matched` with shared `session_id`; after both confirms, session `active`
+
+Haptics alone do **not** prove a match — confirm + shared session does.
+
+Quick API check:
+
+```bash
+curl https://summerhacks-ebon.vercel.app/api/health
+# → {"ok":true,"store":"neon"}
+```
+
+## Related bump docs
+
+- [How bump works](bump/overview.md)
+- [Matching rules](bump/matching.md)
+- [Architecture](bump/architecture.md)
+- [Session bring-up notes](session-2026-08-08-vercel-neon.md)

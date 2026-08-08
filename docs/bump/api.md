@@ -1,14 +1,24 @@
 # Bump — API
 
-Base URL in local/dev is typically proxied from the Vite app to the API (e.g. `/api` → Hono).
+Hono app uses `basePath("/api")`. On Vercel and via the Vite proxy, the browser calls **same-origin** `/api/...`.
 
-All authenticated routes expect `Authorization: Bearer <token>` from lightweight bootstrap auth, or the `x-user-id` header in local stub mode when documented.
+Auth: `Authorization: Bearer <token>` (or `X-User-Token`). MVP **token = user id** from bootstrap. All bump and session routes require auth except health and bootstrap.
+
+## Health
+
+### `GET /api/health`
+
+```json
+{ "ok": true, "store": "neon" }
+```
+
+`store` is `"neon"` when `DATABASE_URL` is set, else `"memory"`.
 
 ## Users
 
-### `POST /users/bootstrap`
+### `POST /api/users/bootstrap`
 
-Create or resume a lightweight user.
+Create or resume a lightweight user. If `deviceId` matches an existing row, that user is resumed (display name may update).
 
 **Body**
 
@@ -20,16 +30,23 @@ Create or resume a lightweight user.
 
 ```json
 {
-  "user": { "id": "...", "displayName": "Alex", "avatarUrl": null, "createdAt": "..." },
+  "user": {
+    "id": "...",
+    "displayName": "Alex",
+    "avatarUrl": null,
+    "createdAt": "..."
+  },
   "token": "..."
 }
 ```
 
+`token` is the user id for MVP.
+
 ## Bumps
 
-### `POST /bumps`
+### `POST /api/bumps`
 
-Create a bump intent. Server attaches coarse IP geo from Vercel headers (or a local stub).
+Create a bump intent. Server attaches coarse IP geo from Vercel headers (or local `DEV_GEO_*` stub). Immediately runs `tryMatchBump`.
 
 **Body**
 
@@ -41,23 +58,7 @@ Create a bump intent. Server attaches coarse IP geo from Vercel headers (or a lo
 }
 ```
 
-**Response**
-
-```json
-{
-  "bumpId": "...",
-  "status": "pending",
-  "expiresAt": "..."
-}
-```
-
-Idempotent on `(userId, idempotencyKey)`.
-
-### `GET /bumps/:id`
-
-Polled while in `searching` (~500ms).
-
-**Response**
+**Response** (`201`)
 
 ```json
 {
@@ -69,32 +70,40 @@ Polled while in `searching` (~500ms).
 }
 ```
 
-When matched:
+When the partner already exists (or this request wins the match):
 
 ```json
 {
+  "bumpId": "...",
   "status": "matched",
+  "expiresAt": "...",
   "sessionId": "...",
   "peer": { "id": "...", "displayName": "Sam", "avatarUrl": null }
 }
 ```
 
+Idempotent on `(userId, idempotencyKey)`.
+
+### `GET /api/bumps/:id`
+
+Polled while searching (~500ms). Re-runs match attempt. Owner-only.
+
 Statuses: `pending` | `matched` | `expired`.
 
-### `DELETE /bumps/:id`
+### `DELETE /api/bumps/:id`
 
-Cancel when leaving Bump Mode. Marks the intent expired/cancelled if still pending.
+Cancel when leaving Bump Mode. Marks the intent expired if still pending.
 
 ## Sessions
 
-### `GET /sessions`
+### `GET /api/sessions`
 
 Recent sessions for the current user (reopen without bump).
 
-### `GET /sessions/:id`
+### `GET /api/sessions/:id`
 
-Session detail: members + `payload` JSONB.
+Session detail: members + `payload` JSONB. Must be a member.
 
-### `POST /sessions/:id/confirm`
+### `POST /api/sessions/:id/confirm`
 
-Accept the matched peer. When both members have confirmed (or MVP policy activates on first confirm — see implementation), status becomes `active`.
+Accept the matched peer (sets this member’s `confirmedAt`). When **every** member has confirmed, session `status` becomes `active`; otherwise it stays `pending_confirm`. Client typically navigates to `/session/:id` after its own confirm.

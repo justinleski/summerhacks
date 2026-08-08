@@ -73,8 +73,10 @@ Full map: [docs/deploy-vercel.md](docs/deploy-vercel.md).
 
 ## Docs
 
-- [Bump overview](docs/bump/overview.md)
+- [How bump works](docs/bump/overview.md)
+- [Matching + haptics](docs/bump/matching.md)
 - [Architecture](docs/bump/architecture.md)
-- [Vercel frontend ↔ backend map](docs/deploy-vercel.md)
-- [Agent spec](.context/features/bump/spec.yaml)
-- [Flattened briefing](.context/features/bump/BRIEFING.md)
+- [API](docs/bump/api.md) · [Data model](docs/bump/data-model.md)
+- [Vercel + Neon (two-device demos)](docs/deploy-vercel.md)
+- [Docs index](docs/README.md)
+- [Agent briefing](.context/features/bump/BRIEFING.md) · [spec](.context/features/bump/spec.yaml)

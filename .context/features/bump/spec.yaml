@@ -1,17 +1,17 @@
 id: bump
-version: 0.1.0
+version: 0.2.0
 name: Bump
-status: draft
+status: implemented
 summary: >
   Classic accelerometer bump that pairs two users via time + IP geo
   and opens a durable shared session that can be reopened without bumping again.
 
 goals:
   - Enter explicit Bump Mode, request device-motion permission on user gesture
-  - Detect accelerometer peak and create a bump intent on the server
+  - Detect accelerometer peak (~threshold 16) and create a bump intent on the server
   - Match two intents by time window + coarse Vercel IP geo (no browser geolocation)
   - Create a durable shared session both users can reopen later
-  - Confirm peer before activating the session
+  - Both members confirm peer before session becomes active
   - Desktop/dev simulate-bump path without accelerometer
 
 non_goals:
@@ -27,6 +27,15 @@ constraints:
   location: ip-geo-only
   realtime_mvp: polling
   auth_mvp: lightweight-device-user
+
+how_it_works:
+  - bootstrap display name; token equals user id
+  - enter bump mode; motion permission on gesture; no GPS
+  - accel peak or simulate → POST /api/bumps with IP geo
+  - match ±2s server time + place; session pending_confirm
+  - poll GET /api/bumps/:id ~500ms (also retries match)
+  - both POST confirm → session active → /session/:id
+  - correctness: matched then confirm then shared sessionId (not haptics)
 
 # Ops memories — do not re-litigate
 ops:
@@ -47,15 +56,17 @@ ops:
     - Vercel may print drizzle insert TS noise during function build; local typecheck is source of truth
   neon_preview:
     - Free Neon plan is enough for hackathon
-    - Enable DATABASE_URL on Preview (Production if used; Development usually no)
+    - Enable DATABASE_URL on Preview and Production if demos use prod URL
+    - Development env usually off
     - Skip per-deployment DB branches for MVP
     - db:push once with local DATABASE_URL before relying on Preview bumps
     - Cast match SQL params (::text/::float8) for Neon HTTP driver
     - Verify GET /api/health store === neon
   mobile_preview: >
-    Disable Vercel Authentication under Deployment Protection if phones
-    should not need a Vercel login. App display-name bootstrap is not that gate.
-    Correctness = matched + confirm + shared sessionId (not haptics alone).
+    Prefer Production (https://summerhacks-ebon.vercel.app) if Preview has
+    Vercel Authentication. Disable Deployment Protection for Preview if needed.
+    App display-name bootstrap is not that gate. Each phone needs its own user.
+    Correctness = matched + both confirm + shared sessionId (not haptics alone).
   recreate_local:
     - npm install && npm run build -w @summerhacks/shared
     - cp .env.example .env
@@ -63,6 +74,7 @@ ops:
   related_ops_docs:
     - README.md
     - docs/deploy-vercel.md
+    - docs/session-2026-08-08-vercel-neon.md
     - .context/features/bump/BRIEFING.md
 
 stack:
@@ -84,28 +96,33 @@ data_model:
     - bump_intents
   flexible:
     - sessions.payload jsonb
+  session_active_when: both members confirmedAt set
 
 apis:
-  - method: POST
-    path: /bumps
-    body: [clientTimestamp, peakMagnitude, idempotencyKey]
-    notes: Server attaches IP geo from Vercel headers
   - method: GET
-    path: /bumps/:id
-    notes: Polled while searching; status pending|matched|expired
+    path: /api/health
+    notes: store neon|memory from DATABASE_URL presence
+  - method: POST
+    path: /api/bumps
+    body: [clientTimestamp, peakMagnitude, idempotencyKey]
+    notes: Server attaches IP geo; tryMatchBump immediately
+  - method: GET
+    path: /api/bumps/:id
+    notes: Polled while searching; retries match; status pending|matched|expired
   - method: DELETE
-    path: /bumps/:id
+    path: /api/bumps/:id
     notes: Cancel when leaving Bump Mode
   - method: GET
-    path: /sessions
+    path: /api/sessions
     notes: Current user recent sessions
   - method: GET
-    path: /sessions/:id
+    path: /api/sessions/:id
   - method: POST
-    path: /sessions/:id/confirm
+    path: /api/sessions/:id/confirm
+    notes: Both members must confirm for status active
   - method: POST
-    path: /users/bootstrap
-    notes: Lightweight identity for MVP
+    path: /api/users/bootstrap
+    notes: Lightweight identity; token equals user id
 
 flows:
   bump_match:
@@ -114,7 +131,7 @@ flows:
     - listen_for_accel_peak
     - post_bump_intent
     - poll_until_matched_or_expired
-    - confirm_peer
+    - confirm_peer_both_sides
     - open_session
   reopen_session:
     - list_recent_sessions
@@ -122,15 +139,14 @@ flows:
 
 ux:
   mode: bump-mode
+  peak_threshold: 16
   states:
     - idle
     - listening
-    - bump_detected
     - searching
     - matched_confirm
-    - active_session
     - expired
-    - no_match
+    - error
   permissions:
     - device-motion
   haptics: magnitude-linked
@@ -140,11 +156,16 @@ ux:
 
 matching:
   time_window_ms: 2000
-  place: vercel-ip-geo
   expiry_ms: 8000
   poll_interval_ms: 500
+  place: vercel-ip-geo
+  place_rules:
+    - same country and same city or region
+    - or lat/lng euclidean distance degrees less than 0.5
+    - or same IP
   one_to_one: true
-  confirm_required: true
+  confirm_required: both_members
+  clock: server_receive_time
 
 related_docs:
   - docs/bump/overview.md
@@ -153,5 +174,6 @@ related_docs:
   - docs/bump/data-model.md
   - docs/bump/matching.md
   - docs/deploy-vercel.md
+  - docs/session-2026-08-08-vercel-neon.md
   - README.md
   - .context/features/bump/BRIEFING.md
