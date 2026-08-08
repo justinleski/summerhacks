@@ -48,24 +48,33 @@ function mapBump(row: typeof schema.bumpIntents.$inferSelect): StoredBumpIntent 
 }
 
 function placesSqlMatch(a: StoredBumpIntent): ReturnType<typeof and> {
+  // Neon HTTP driver needs explicit casts — untyped params become "could not determine data type of parameter $N"
+  const serverMs = a.serverTimestamp.getTime();
+  const geoCountry = a.geoCountry;
+  const geoCity = a.geoCity;
+  const geoRegion = a.geoRegion;
+  const geoLat = a.geoLat;
+  const geoLng = a.geoLng;
+  const ip = a.ip;
+
   return and(
     eq(schema.bumpIntents.status, "pending"),
     ne(schema.bumpIntents.userId, a.userId),
     gt(schema.bumpIntents.expiresAt, new Date()),
-    sql`abs(extract(epoch from ${schema.bumpIntents.serverTimestamp}) * 1000 - ${a.serverTimestamp.getTime()}) <= ${MATCH_TIME_WINDOW_MS}`,
+    sql`abs(extract(epoch from ${schema.bumpIntents.serverTimestamp}) * 1000 - ${serverMs}::float8) <= ${MATCH_TIME_WINDOW_MS}::float8`,
     sql`(
-      (${schema.bumpIntents.geoCountry} is not null and ${a.geoCountry} is not null and ${schema.bumpIntents.geoCountry} = ${a.geoCountry}
+      (${schema.bumpIntents.geoCountry} is not null and ${geoCountry}::text is not null and ${schema.bumpIntents.geoCountry} = ${geoCountry}::text
         and (
-          (${schema.bumpIntents.geoCity} is not null and ${a.geoCity} is not null and ${schema.bumpIntents.geoCity} = ${a.geoCity})
-          or (${schema.bumpIntents.geoRegion} is not null and ${a.geoRegion} is not null and ${schema.bumpIntents.geoRegion} = ${a.geoRegion})
+          (${schema.bumpIntents.geoCity} is not null and ${geoCity}::text is not null and ${schema.bumpIntents.geoCity} = ${geoCity}::text)
+          or (${schema.bumpIntents.geoRegion} is not null and ${geoRegion}::text is not null and ${schema.bumpIntents.geoRegion} = ${geoRegion}::text)
         )
       )
       or (
         ${schema.bumpIntents.geoLat} is not null and ${schema.bumpIntents.geoLng} is not null
-        and ${a.geoLat} is not null and ${a.geoLng} is not null
-        and sqrt(power(${schema.bumpIntents.geoLat} - ${a.geoLat}, 2) + power(${schema.bumpIntents.geoLng} - ${a.geoLng}, 2)) < 0.5
+        and ${geoLat}::float8 is not null and ${geoLng}::float8 is not null
+        and sqrt(power(${schema.bumpIntents.geoLat} - ${geoLat}::float8, 2) + power(${schema.bumpIntents.geoLng} - ${geoLng}::float8, 2)) < 0.5
       )
-      or ${schema.bumpIntents.ip} = ${a.ip}
+      or ${schema.bumpIntents.ip} = ${ip}::text
     )`,
   );
 }

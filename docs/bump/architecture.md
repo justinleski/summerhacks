@@ -33,8 +33,11 @@ flowchart LR
 | Frontend | Vite + React + TS on Vercel | Static SPA |
 | API | Hono via Vercel serverless | Same deploy; no second host for MVP |
 | DB | Neon Postgres | Shared state across ephemeral functions |
+| Local without Neon | In-memory when `DATABASE_URL` unset | Two-tab local OK; Preview needs Neon |
 | Match notify | Short polling in Bump Mode only | Serverless-safe; no long-lived WS |
 | Canvas later | PartyKit / Ably / Fly WS | Attach to existing `sessionId` |
+
+Recreate / Preview Neon / env switch: [../deploy-vercel.md](../deploy-vercel.md) and root `README.md`.
 
 ## Bump match sequence
 
@@ -85,7 +88,7 @@ flowchart TB
 
 - `apps/web` — Vite React client
 - `apps/api` — Hono API (local Node + shared by Vercel entry)
-- `api/[[...route]].ts` — Vercel serverless catch-all → Hono (`/api/*`)
+- `api/index.ts` — Vercel serverless entry; `vercel.json` rewrites `/api/*` → `/api` (Next-style catch-all filenames are unreliable outside Next.js)
 - `packages/shared` — shared types and Zod schemas
 
 See also [Vercel frontend ↔ backend map](../deploy-vercel.md).

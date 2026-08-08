@@ -12,4 +12,6 @@ Human-readable product and engineering docs. Agent-oriented YAML specs live unde
 
 | Topic | Docs |
 | --- | --- |
-| Vercel deploy (CLI + FE/BE map) | [deploy-vercel.md](deploy-vercel.md) |
+| Vercel deploy, Neon Preview, recreate locally | [deploy-vercel.md](deploy-vercel.md) |
+| Quick start / env switch | [../README.md](../README.md) |
+| Session notes (2026-08-08 deploy bring-up) | [session-2026-08-08-vercel-neon.md](session-2026-08-08-vercel-neon.md) |

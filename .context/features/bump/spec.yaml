@@ -28,6 +28,43 @@ constraints:
   realtime_mvp: polling
   auth_mvp: lightweight-device-user
 
+# Ops memories — do not re-litigate
+ops:
+  local_store_switch: >
+    DATABASE_URL unset → in-memory (local two-tab OK).
+    DATABASE_URL set → Neon (required on Vercel for two-phone match).
+    No separate USE_REMOTE_DB flag. Quote & in .env URLs before sourcing.
+  secrets:
+    - .env and .env.local are gitignored
+    - .env.example stays in git (placeholders only)
+    - .vercel/ is gitignored (vercel link per machine)
+  vercel_api_entry:
+    - api/index.ts + vercel.json rewrite /api/(.*) → /api
+    - Never rely on Next-style api/[[...route]].ts on this non-Next project
+    - Export named GET/POST/… from hono/vercel handle (default Response ignored)
+    - Root package.json must have "type": "module"
+    - Dynamic import apps/api/src/app.js to avoid ERR_REQUIRE_ESM
+    - Vercel may print drizzle insert TS noise during function build; local typecheck is source of truth
+  neon_preview:
+    - Free Neon plan is enough for hackathon
+    - Enable DATABASE_URL on Preview (Production if used; Development usually no)
+    - Skip per-deployment DB branches for MVP
+    - db:push once with local DATABASE_URL before relying on Preview bumps
+    - Cast match SQL params (::text/::float8) for Neon HTTP driver
+    - Verify GET /api/health store === neon
+  mobile_preview: >
+    Disable Vercel Authentication under Deployment Protection if phones
+    should not need a Vercel login. App display-name bootstrap is not that gate.
+    Correctness = matched + confirm + shared sessionId (not haptics alone).
+  recreate_local:
+    - npm install && npm run build -w @summerhacks/shared
+    - cp .env.example .env
+    - npm run dev  # or vercel link + npm run deploy / deploy:prod
+  related_ops_docs:
+    - README.md
+    - docs/deploy-vercel.md
+    - .context/features/bump/BRIEFING.md
+
 stack:
   web: vite-react-ts
   api: hono-vercel
@@ -115,3 +152,6 @@ related_docs:
   - docs/bump/api.md
   - docs/bump/data-model.md
   - docs/bump/matching.md
+  - docs/deploy-vercel.md
+  - README.md
+  - .context/features/bump/BRIEFING.md
