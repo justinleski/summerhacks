@@ -1,0 +1,117 @@
+id: bump
+version: 0.1.0
+name: Bump
+status: draft
+summary: >
+  Classic accelerometer bump that pairs two users via time + IP geo
+  and opens a durable shared session that can be reopened without bumping again.
+
+goals:
+  - Enter explicit Bump Mode, request device-motion permission on user gesture
+  - Detect accelerometer peak and create a bump intent on the server
+  - Match two intents by time window + coarse Vercel IP geo (no browser geolocation)
+  - Create a durable shared session both users can reopen later
+  - Confirm peer before activating the session
+  - Desktop/dev simulate-bump path without accelerometer
+
+non_goals:
+  - Collaborative canvas / WebSocket protocol
+  - Browser geolocation / GPS matching
+  - Full social feed or photo graph
+  - NFC / QR fallback
+  - Strong anti-spoofing
+
+constraints:
+  deploy: vercel
+  db: neon-postgres
+  location: ip-geo-only
+  realtime_mvp: polling
+  auth_mvp: lightweight-device-user
+
+stack:
+  web: vite-react-ts
+  api: hono-vercel
+  db: neon-postgres
+  orm: drizzle
+  monorepo:
+    - apps/web
+    - apps/api
+    - packages/shared
+
+data_model:
+  durable:
+    - users
+    - sessions
+    - session_members
+  ephemeral:
+    - bump_intents
+  flexible:
+    - sessions.payload jsonb
+
+apis:
+  - method: POST
+    path: /bumps
+    body: [clientTimestamp, peakMagnitude, idempotencyKey]
+    notes: Server attaches IP geo from Vercel headers
+  - method: GET
+    path: /bumps/:id
+    notes: Polled while searching; status pending|matched|expired
+  - method: DELETE
+    path: /bumps/:id
+    notes: Cancel when leaving Bump Mode
+  - method: GET
+    path: /sessions
+    notes: Current user recent sessions
+  - method: GET
+    path: /sessions/:id
+  - method: POST
+    path: /sessions/:id/confirm
+  - method: POST
+    path: /users/bootstrap
+    notes: Lightweight identity for MVP
+
+flows:
+  bump_match:
+    - enter_bump_mode
+    - request_motion_permission
+    - listen_for_accel_peak
+    - post_bump_intent
+    - poll_until_matched_or_expired
+    - confirm_peer
+    - open_session
+  reopen_session:
+    - list_recent_sessions
+    - get_session_by_id
+
+ux:
+  mode: bump-mode
+  states:
+    - idle
+    - listening
+    - bump_detected
+    - searching
+    - matched_confirm
+    - active_session
+    - expired
+    - no_match
+  permissions:
+    - device-motion
+  haptics: magnitude-linked
+  haptics_notes: >
+    Android Chrome uses navigator.vibrate; iOS has no vibrate API —
+    drive a shared visual intensity meter on all platforms.
+
+matching:
+  time_window_ms: 2000
+  place: vercel-ip-geo
+  expiry_ms: 8000
+  poll_interval_ms: 500
+  one_to_one: true
+  confirm_required: true
+
+related_docs:
+  - docs/bump/overview.md
+  - docs/bump/architecture.md
+  - docs/bump/api.md
+  - docs/bump/data-model.md
+  - docs/bump/matching.md
