@@ -7,3 +7,9 @@ Human-readable product and engineering docs. Agent-oriented YAML specs live unde
 | Feature | Docs |
 | --- | --- |
 | Bump | [bump/overview.md](bump/overview.md) |
+
+## Ops
+
+| Topic | Docs |
+| --- | --- |
+| Vercel deploy (CLI + FE/BE map) | [deploy-vercel.md](deploy-vercel.md) |

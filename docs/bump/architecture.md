@@ -84,5 +84,8 @@ flowchart TB
 ## Monorepo layout
 
 - `apps/web` — Vite React client
-- `apps/api` — Hono API (Vercel functions)
+- `apps/api` — Hono API (local Node + shared by Vercel entry)
+- `api/[[...route]].ts` — Vercel serverless catch-all → Hono (`/api/*`)
 - `packages/shared` — shared types and Zod schemas
+
+See also [Vercel frontend ↔ backend map](../deploy-vercel.md).
