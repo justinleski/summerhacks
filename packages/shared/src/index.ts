@@ -255,3 +255,36 @@ export const uploadEventImageResponseSchema = z.object({
 export type UploadEventImageResponse = z.infer<
   typeof uploadEventImageResponseSchema
 >;
+
+// --- Checkins / map ---
+
+export const CHECKIN_CAPTION_MAX = 140;
+export const CHECKIN_REGION_MAX = 120;
+
+export const createCheckinBodySchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  region: z.string().min(1).max(CHECKIN_REGION_MAX),
+  caption: z.string().max(CHECKIN_CAPTION_MAX).optional(),
+  photoUrl: z.string().url().nullable().optional(),
+});
+export type CreateCheckinBody = z.infer<typeof createCheckinBodySchema>;
+
+export const checkinSchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  lat: z.number(),
+  lng: z.number(),
+  region: z.string().nullable(),
+  photoUrl: z.string().nullable(),
+  caption: z.string().nullable(),
+  createdAt: z.string().datetime(),
+});
+export type Checkin = z.infer<typeof checkinSchema>;
+
+export const uploadCheckinPhotoResponseSchema = z.object({
+  url: z.string().url(),
+});
+export type UploadCheckinPhotoResponse = z.infer<
+  typeof uploadCheckinPhotoResponseSchema
+>;

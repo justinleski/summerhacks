@@ -1,4 +1,5 @@
 import {
+  boolean,
   doublePrecision,
   jsonb,
   pgTable,
@@ -131,6 +132,7 @@ export const friendships = pgTable(
     userBId: uuid("user_b_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    isWatchlisted: boolean("is_watchlisted").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -217,4 +219,40 @@ export const activityNotifications = pgTable("activity_notifications", {
     .notNull()
     .defaultNow(),
   readAt: timestamp("read_at", { withTimezone: true }),
+});
+
+export const checkins = pgTable("checkins", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  lat: doublePrecision("lat").notNull(),
+  lng: doublePrecision("lng").notNull(),
+  region: text("region"),
+  photoUrl: text("photo_url"),
+  caption: text("caption"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/** Anonymous aggregate feed for the public activity counter — no user-identifying column. */
+export const connections = pgTable("connections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  type: text("type").notNull(),
+  region: text("region").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const eventPhotos = pgTable("event_photos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventId: uuid("event_id")
+    .notNull()
+    .references(() => events.id, { onDelete: "cascade" }),
+  photoUrl: text("photo_url").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });

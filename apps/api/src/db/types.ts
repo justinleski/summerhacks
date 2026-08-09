@@ -111,6 +111,26 @@ export type FriendsMeResult = {
   friends: FriendSummary[];
 };
 
+export type CreateCheckinInput = {
+  userId: string;
+  lat: number;
+  lng: number;
+  region: string;
+  photoUrl: string | null;
+  caption: string | null;
+};
+
+export type StoredCheckin = {
+  id: string;
+  userId: string;
+  lat: number;
+  lng: number;
+  region: string | null;
+  photoUrl: string | null;
+  caption: string | null;
+  createdAt: Date;
+};
+
 export type InboxFriendRequest = FriendRequest & {
   fromUser: FriendSummary;
 };
@@ -178,6 +198,10 @@ export interface Store {
     notificationId: string,
   ): Promise<ActivityNotification | null>;
   markAllActivityRead(userId: string): Promise<number>;
+
+  // Checkins
+  createCheckin(input: CreateCheckinInput): Promise<StoredCheckin>;
+  listCheckinsForUser(userId: string): Promise<StoredCheckin[]>;
 }
 
 export function toIso(d: Date): string {

@@ -101,3 +101,13 @@ export async function uploadAvatar(file: File): Promise<string> {
   });
   return res.url;
 }
+
+export async function uploadCheckinPhoto(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await api<{ url: string }>("/uploads/checkin-photo", {
+    method: "POST",
+    body: form,
+  });
+  return res.url;
+}

@@ -5,6 +5,7 @@ import { ZodError } from "zod";
 import { activityRoutes } from "./routes/activity.js";
 import { bumpsRoutes } from "./routes/bumps.js";
 import { calendarRoutes } from "./routes/calendar.js";
+import { checkinsRoutes } from "./routes/checkins.js";
 import { eventsRoutes } from "./routes/events.js";
 import { friendsRoutes } from "./routes/friends.js";
 import { sessionsRoutes } from "./routes/sessions.js";
@@ -37,6 +38,7 @@ app.route("/calendar", calendarRoutes);
 app.route("/events", eventsRoutes);
 app.route("/activity", activityRoutes);
 app.route("/uploads", uploadsRoutes);
+app.route("/checkins", checkinsRoutes);
 
 app.onError((err, c) => {
   if (err instanceof ZodError) {

@@ -13,9 +13,11 @@ import {
 import { generateFriendCode, normalizeFriendCode } from "./friend-code.js";
 import type {
   CreateBumpInput,
+  CreateCheckinInput,
   CreateEventInput,
   InboxFriendRequest,
   StoredBumpIntent,
+  StoredCheckin,
   StoredFriendRequest,
   StoredSession,
   StoredSessionMember,
@@ -124,6 +126,13 @@ type StoredActivity = {
   readAt: Date | null;
 };
 
+type StoredConnection = {
+  id: string;
+  type: string;
+  region: string;
+  createdAt: Date;
+};
+
 export function createMemoryStore(): Store {
   const users = new Map<string, StoredUser>();
   const usersByDevice = new Map<string, string>();
@@ -140,6 +149,8 @@ export function createMemoryStore(): Store {
   const comments = new Map<string, StoredComment>();
   const subscriptions = new Set<string>(); // `${eventId}:${userId}`
   const activities = new Map<string, StoredActivity>();
+  const checkins = new Map<string, StoredCheckin>();
+  const connections = new Map<string, StoredConnection>();
 
   function allocFriendCode(): string {
     for (let i = 0; i < 20; i++) {
@@ -884,6 +895,37 @@ export function createMemoryStore(): Store {
         count++;
       }
       return count;
+    },
+
+    async createCheckin(input: CreateCheckinInput) {
+      const now = new Date();
+      const checkin: StoredCheckin = {
+        id: randomUUID(),
+        userId: input.userId,
+        lat: input.lat,
+        lng: input.lng,
+        region: input.region,
+        photoUrl: input.photoUrl,
+        caption: input.caption,
+        createdAt: now,
+      };
+      checkins.set(checkin.id, checkin);
+
+      const connection: StoredConnection = {
+        id: randomUUID(),
+        type: "checkin",
+        region: input.region,
+        createdAt: now,
+      };
+      connections.set(connection.id, connection);
+
+      return checkin;
+    },
+
+    async listCheckinsForUser(userId) {
+      return [...checkins.values()]
+        .filter((c) => c.userId === userId)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     },
   };
 }

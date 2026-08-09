@@ -17,9 +17,11 @@ import { generateFriendCode, normalizeFriendCode } from "./friend-code.js";
 import * as schema from "./schema.js";
 import type {
   CreateBumpInput,
+  CreateCheckinInput,
   CreateEventInput,
   InboxFriendRequest,
   StoredBumpIntent,
+  StoredCheckin,
   StoredFriendRequest,
   StoredUser,
   Store,
@@ -58,6 +60,19 @@ function mapBump(row: typeof schema.bumpIntents.$inferSelect): StoredBumpIntent 
     matchedBumpId: row.matchedBumpId,
     sessionId: row.sessionId,
     expiresAt: row.expiresAt,
+  };
+}
+
+function mapCheckin(row: typeof schema.checkins.$inferSelect): StoredCheckin {
+  return {
+    id: row.id,
+    userId: row.userId,
+    lat: row.lat,
+    lng: row.lng,
+    region: row.region,
+    photoUrl: row.photoUrl,
+    caption: row.caption,
+    createdAt: row.createdAt,
   };
 }
 
@@ -1166,6 +1181,39 @@ export function createNeonStore(databaseUrl: string): Store {
         )
         .returning();
       return updated.length;
+    },
+
+    async createCheckin(input: CreateCheckinInput) {
+      const now = new Date();
+      const [row] = await db
+        .insert(schema.checkins)
+        .values({
+          userId: input.userId,
+          lat: input.lat,
+          lng: input.lng,
+          region: input.region,
+          photoUrl: input.photoUrl,
+          caption: input.caption,
+          createdAt: now,
+        })
+        .returning();
+
+      await db.insert(schema.connections).values({
+        type: "checkin",
+        region: input.region,
+        createdAt: now,
+      });
+
+      return mapCheckin(row);
+    },
+
+    async listCheckinsForUser(userId) {
+      const rows = await db
+        .select()
+        .from(schema.checkins)
+        .where(eq(schema.checkins.userId, userId))
+        .orderBy(desc(schema.checkins.createdAt));
+      return rows.map(mapCheckin);
     },
   };
 }
