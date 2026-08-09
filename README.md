@@ -1,6 +1,6 @@
 # Summerhacks
 
-_A small shared artifact for friends who keep ending up in different cities._
+_Everyone wants a village, but nobody wants to be a villager._
 
 ## What it is
 
