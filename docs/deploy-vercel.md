@@ -10,11 +10,15 @@ Browser
   ├─ GET /                    → static files from apps/web/dist
   ├─ GET /session/:id         → SPA fallback (index.html) → React Router
   ├─ GET /friends|/calendar|/profile|/events/:id → SPA
+  ├─ GET /memories|/memories/:id|/memories/session/:sessionId → SPA
   │
   └─ /api/*                   → rewrite → api/index.ts (Hono)
                                   └─ apps/api/src/app.ts (basePath /api)
                                        └─ Neon Postgres (DATABASE_URL)
                                        └─ Vercel Blob (BLOB_READ_WRITE_TOKEN, optional)
+                                       └─ Spotify Web API (SPOTIFY_*, optional)
+
+Vercel Cron ──GET──> /api/internal/sweep-memories (every 15 min)
 ```
 
 | Concern | Where | Notes |
@@ -96,9 +100,9 @@ npx vercel env add DATABASE_URL production   # if using Production
 6. Redeploy: `npm run deploy` or `npm run deploy:prod`
 7. Verify: `GET /api/health` → `"store":"neon"`
 
-### Schema push after Friends / Calendar / Profile
+### Schema push after Friends / Calendar / Profile / Memories
 
-New tables/columns (`friend_code`, `bio`, friendships, events, activity, …) require another `db:push` against Neon before Preview uses them:
+New tables/columns (`friend_code`, `bio`, friendships, events, activity, memories, memory_submissions, memory_photos, memory_songs, memory_playlists, spotify_connections, …) require another `db:push` against Neon before Preview uses them:
 
 ```bash
 set -a && source .env && set +a
@@ -117,7 +121,49 @@ npx vercel env add BLOB_READ_WRITE_TOKEN preview
 npx vercel env add BLOB_READ_WRITE_TOKEN production
 ```
 
-Without the token, `POST /api/events` and profile edits still work; `POST /api/uploads/event-image` and `POST /api/uploads/avatar` return **503** with a clear error.
+Without the token, `POST /api/events` and profile edits still work; `POST /api/uploads/event-image`, `POST /api/uploads/avatar`, and `POST /api/memories/:id/photos` return **503** with a clear error.
+
+### Spotify + cron (Memories)
+
+Memories needs four more server-side vars. Everything except song paste and playlist export works without them.
+
+| Var | Used for |
+| --- | --- |
+| `SPOTIFY_CLIENT_ID` | OAuth + client-credentials track lookup |
+| `SPOTIFY_CLIENT_SECRET` | same |
+| `SPOTIFY_REDIRECT_URI` | must match the dashboard entry exactly |
+| `CRON_SECRET` | authorizes the expiry sweeper **and** signs the Spotify OAuth `state` |
+
+1. Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+2. Register **both** redirect URIs:
+   - `http://localhost:8787/api/spotify/callback`
+   - `https://summerhacks-ebon.vercel.app/api/spotify/callback`
+3. Add the vars (repeat with `production`):
+
+```bash
+npx vercel env add SPOTIFY_CLIENT_ID preview
+npx vercel env add SPOTIFY_CLIENT_SECRET preview
+npx vercel env add SPOTIFY_REDIRECT_URI preview   # the prod callback URL
+npx vercel env add CRON_SECRET preview            # 16+ random chars
+```
+
+`SPOTIFY_REDIRECT_URI` is environment-specific — set the localhost value in `.env` and the deployed URL on Vercel.
+
+`vercel.json` registers the sweeper:
+
+```json
+"crons": [{ "path": "/api/internal/sweep-memories", "schedule": "*/15 * * * *" }]
+```
+
+Vercel Cron issues a **GET** (both GET and POST are registered) and, once `CRON_SECRET` exists on the project, sends it as `Authorization: Bearer <CRON_SECRET>`. Manual run:
+
+```bash
+curl -X POST https://summerhacks-ebon.vercel.app/api/internal/sweep-memories \
+  -H "x-cron-secret: $CRON_SECRET"
+# → {"expired":0,"deletedPhotos":0}
+```
+
+Cron jobs are a paid-plan feature on some Vercel tiers, and Hobby projects are limited to daily schedules. If `*/15` is rejected, either loosen the schedule or hit the endpoint from an external scheduler with `x-cron-secret`. Without any sweeper, stale memories simply stay `open` past their window — the UI already clamps the countdown and stops offering the CTA.
 
 ### Which Vercel environments?
 

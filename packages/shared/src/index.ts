@@ -411,3 +411,177 @@ export const coverVoteBodySchema = z.object({
   choiceUserId: z.string().uuid().nullable(),
 });
 export type CoverVoteBody = z.infer<typeof coverVoteBodySchema>;
+
+// --- Memories ---
+
+export const MEMORY_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const MEMORY_MAX_PHOTOS_PER_USER = 8;
+export const MEMORY_MIN_PHOTOS_PER_USER = 2;
+export const MEMORY_SONGS_PER_USER = 3;
+export const MEMORY_NOTE_MAX = 140;
+export const PHOTOBOOTH_SLOTS_PER_STRIP = 4;
+export const MEMORY_POLL_INTERVAL_MS = 2000;
+
+/** Photos are contributed in pairs: 2, 4, 6, or 8 per member. */
+export const MEMORY_VALID_PHOTO_COUNTS = [2, 4, 6, 8] as const;
+
+export function isValidMemoryPhotoCount(count: number): boolean {
+  return (
+    count >= MEMORY_MIN_PHOTOS_PER_USER &&
+    count <= MEMORY_MAX_PHOTOS_PER_USER &&
+    count % 2 === 0
+  );
+}
+
+export const memoryStatusSchema = z.enum(["open", "locked", "expired"]);
+export type MemoryStatus = z.infer<typeof memoryStatusSchema>;
+
+/** Resolved Spotify metadata for one contributed track. */
+export const memorySongInputSchema = z.object({
+  spotifyUrl: z.string().url(),
+  spotifyTrackId: z.string().min(1),
+  trackTitle: z.string().min(1),
+  artistName: z.string().min(1),
+  albumArtUrl: z.string().url().nullable(),
+});
+export type MemorySongInput = z.infer<typeof memorySongInputSchema>;
+
+export const memorySongSchema = memorySongInputSchema.extend({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  position: z.number().int().min(0).max(MEMORY_SONGS_PER_USER - 1),
+});
+export type MemorySong = z.infer<typeof memorySongSchema>;
+
+export const memoryPhotoSchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  photoUrl: z.string().url(),
+  uploadOrder: z.number().int().nonnegative(),
+});
+export type MemoryPhoto = z.infer<typeof memoryPhotoSchema>;
+
+export const memoryMemberSchema = z.object({
+  userId: z.string().uuid(),
+  displayName: z.string(),
+  avatarUrl: z.string().nullable(),
+  submitted: z.boolean(),
+  isViewer: z.boolean(),
+});
+export type MemoryMember = z.infer<typeof memoryMemberSchema>;
+
+export const memoryPlaylistSchema = z.object({
+  spotifyPlaylistId: z.string(),
+  spotifyPlaylistUrl: z.string().url(),
+});
+export type MemoryPlaylist = z.infer<typeof memoryPlaylistSchema>;
+
+const memoryBaseShape = {
+  id: z.string().uuid(),
+  sessionId: z.string().uuid(),
+  note: z.string().nullable(),
+  /** Mirrors `sessions.createdAt` — when the bump happened. */
+  hangoutAt: z.string().datetime(),
+  windowStartsAt: z.string().datetime(),
+  windowExpiresAt: z.string().datetime(),
+  members: z.array(memoryMemberSchema),
+};
+
+/** Pre-lock view: only the viewer's own contributions, plus everyone's submitted flag. */
+export const memoryDraftResponseSchema = z.object({
+  ...memoryBaseShape,
+  status: z.literal("open"),
+  lockedAt: z.null(),
+  mySubmitted: z.boolean(),
+  myPhotos: z.array(memoryPhotoSchema),
+  mySongs: z.array(memorySongSchema),
+});
+export type MemoryDraftResponse = z.infer<typeof memoryDraftResponseSchema>;
+
+/** Post-lock view: every member's photos and songs are revealed. */
+export const memoryLockedResponseSchema = z.object({
+  ...memoryBaseShape,
+  status: z.literal("locked"),
+  lockedAt: z.string().datetime(),
+  photos: z.array(memoryPhotoSchema),
+  songs: z.array(memorySongSchema),
+  myPlaylist: memoryPlaylistSchema.nullable(),
+});
+export type MemoryLockedResponse = z.infer<typeof memoryLockedResponseSchema>;
+
+export const memoryResponseSchema = z.discriminatedUnion("status", [
+  memoryDraftResponseSchema,
+  memoryLockedResponseSchema,
+]);
+export type MemoryResponse = z.infer<typeof memoryResponseSchema>;
+
+export const memoryListItemSchema = z.object({
+  id: z.string().uuid(),
+  sessionId: z.string().uuid(),
+  hangoutAt: z.string().datetime(),
+  lockedAt: z.string().datetime(),
+  memberDisplayNames: z.array(z.string()),
+  coverPhotoUrl: z.string().url().nullable(),
+  songCount: z.number().int().nonnegative(),
+});
+export type MemoryListItem = z.infer<typeof memoryListItemSchema>;
+
+export const memoryPhotoUploadResponseSchema = z.object({
+  photo: memoryPhotoSchema,
+});
+export type MemoryPhotoUploadResponse = z.infer<
+  typeof memoryPhotoUploadResponseSchema
+>;
+
+export const putMemorySongBodySchema = z.object({
+  spotifyUrl: z.string().min(1).max(512),
+});
+export type PutMemorySongBody = z.infer<typeof putMemorySongBodySchema>;
+
+export const updateMemoryNoteBodySchema = z.object({
+  note: z.string().max(MEMORY_NOTE_MAX).nullable(),
+});
+export type UpdateMemoryNoteBody = z.infer<typeof updateMemoryNoteBodySchema>;
+
+/** Submitting is irreversible, so the client must opt in explicitly. */
+export const submitMemoryBodySchema = z.object({
+  confirm: z.literal(true),
+});
+export type SubmitMemoryBody = z.infer<typeof submitMemoryBodySchema>;
+
+export const spotifyStatusResponseSchema = z.object({
+  connected: z.boolean(),
+  spotifyUserId: z.string().nullable(),
+});
+export type SpotifyStatusResponse = z.infer<typeof spotifyStatusResponseSchema>;
+
+export const spotifyConnectResponseSchema = z.object({
+  authUrl: z.string().url(),
+});
+export type SpotifyConnectResponse = z.infer<
+  typeof spotifyConnectResponseSchema
+>;
+
+export const exportPlaylistResponseSchema = z.object({
+  playlistUrl: z.string().url(),
+});
+export type ExportPlaylistResponse = z.infer<
+  typeof exportPlaylistResponseSchema
+>;
+
+/** Accepts `https://open.spotify.com/track/{id}`, `spotify:track:{id}`, or a bare id. */
+export function parseSpotifyTrackId(input: string): string | null {
+  const raw = input.trim();
+  if (!raw) return null;
+
+  const uriMatch = /^spotify:track:([A-Za-z0-9]+)$/.exec(raw);
+  if (uriMatch) return uriMatch[1]!;
+
+  const urlMatch = /^https?:\/\/[^/]*spotify\.com\/(?:[^/]+\/)*track\/([A-Za-z0-9]+)/.exec(
+    raw,
+  );
+  if (urlMatch) return urlMatch[1]!;
+
+  if (/^[A-Za-z0-9]{22}$/.test(raw)) return raw;
+  return null;
+}

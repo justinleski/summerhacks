@@ -2,15 +2,15 @@ import { put } from "@vercel/blob";
 import { Hono } from "hono";
 import { requireAuth, type AuthVariables } from "../middleware/auth.js";
 
-const MAX_BYTES = 4 * 1024 * 1024;
-const ALLOWED_TYPES = new Set([
+export const MAX_BYTES = 4 * 1024 * 1024;
+export const ALLOWED_TYPES = new Set([
   "image/jpeg",
   "image/png",
   "image/webp",
   "image/gif",
 ]);
 
-function extForType(type: string): string {
+export function extForType(type: string): string {
   if (type === "image/png") return "png";
   if (type === "image/webp") return "webp";
   if (type === "image/gif") return "gif";

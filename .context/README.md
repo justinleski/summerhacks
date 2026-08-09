@@ -19,6 +19,7 @@ Machine-oriented feature specs for AI agents. Prefer these over scanning the who
 | Friends | [features/friends/spec.yaml](features/friends/spec.yaml) | [features/friends/BRIEFING.md](features/friends/BRIEFING.md) | [docs/friends/overview.md](../docs/friends/overview.md) |
 | Calendar | [features/calendar/spec.yaml](features/calendar/spec.yaml) | [features/calendar/BRIEFING.md](features/calendar/BRIEFING.md) | [docs/calendar/overview.md](../docs/calendar/overview.md) |
 | Profile | [features/profile/spec.yaml](features/profile/spec.yaml) | [features/profile/BRIEFING.md](features/profile/BRIEFING.md) | [docs/profile/overview.md](../docs/profile/overview.md) |
+| Memories | [features/memories/spec.yaml](features/memories/spec.yaml) | [features/memories/BRIEFING.md](features/memories/BRIEFING.md) | [docs/memories/overview.md](../docs/memories/overview.md) |
 
 ## One-line models
 
@@ -27,11 +28,13 @@ Machine-oriented feature specs for AI agents. Prefer these over scanning the who
 - **Friends:** Friend code → inbox Accept/Reject; follow = friendship.
 - **Calendar:** Friends-only events + FOAF attendance; activity fan-out; optional Blob images.
 - **Profile:** Bio + pixel avatar (Blob) + client theme + logout.
+- **Memories:** 24h window per bump session; all members submit 3 songs + even photos; last submit locks → receipt, photobooth strips, Spotify playlist.
 
 ## Local vs Preview DB (agents)
 
 - Unset `DATABASE_URL` → memory store (local OK)
 - Set `DATABASE_URL` on Vercel Preview/Prod → Neon
-- Image/avatar/album-cover uploads need `BLOB_READ_WRITE_TOKEN`
+- Image/avatar/album-cover/memory-photo uploads need `BLOB_READ_WRITE_TOKEN`
 - Album covers: per-member draw → ready → vote/spin (see `.context/features/album/`)
+- Memory playlists + song paste need `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` / `SPOTIFY_REDIRECT_URI`; the expiry cron and Spotify `state` signing need `CRON_SECRET`
 - Never commit `.env` / `.vercel/`; use `.env.example` as the template

@@ -15,6 +15,12 @@ import type {
   FriendRequest,
   FriendRequestStatus,
   FriendSummary,
+  MemoryListItem,
+  MemoryPhoto,
+  MemoryResponse,
+  MemorySong,
+  MemorySongInput,
+  MemoryStatus,
   PeerSummary,
   PixelGridSize,
   RsvpStatus,
@@ -299,6 +305,56 @@ export type InboxFriendRequest = FriendRequest & {
   fromUser: FriendSummary;
 };
 
+export type StoredMemory = {
+  id: string;
+  sessionId: string;
+  status: MemoryStatus;
+  note: string | null;
+  windowStartsAt: Date;
+  windowExpiresAt: Date;
+  lockedAt: Date | null;
+  createdAt: Date;
+};
+
+/** Everything the route guards need in one read: membership, submit state, counts. */
+export type StoredMemoryAccess = {
+  memory: StoredMemory;
+  isMember: boolean;
+  submitted: boolean;
+  photoCount: number;
+  songCount: number;
+  memberUserIds: string[];
+};
+
+export type SubmitMemoryResult = {
+  memory: StoredMemory;
+  /** True when this submission was the one that locked the memory. */
+  locked: boolean;
+  memberUserIds: string[];
+};
+
+export type ExpiredMemory = {
+  memoryId: string;
+  sessionId: string;
+  photoUrls: string[];
+};
+
+export type StoredSpotifyConnection = {
+  userId: string;
+  spotifyUserId: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date;
+  createdAt: Date;
+};
+
+export type UpsertSpotifyConnectionInput = {
+  spotifyUserId: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date;
+};
+
 export interface Store {
   bootstrapUser(input: {
     displayName: string;
@@ -410,6 +466,72 @@ export interface Store {
     notificationId: string,
   ): Promise<ActivityNotification | null>;
   markAllActivityRead(userId: string): Promise<number>;
+
+  // Memories
+  /** Called from `tryMatchBump` the moment a bump session is created. */
+  createMemoryForSession(
+    sessionId: string,
+    memberUserIds: string[],
+    sessionCreatedAt: Date,
+  ): Promise<StoredMemory>;
+  /** Guard helper: membership + submit state + counts for one memory. */
+  getMemoryAccess(
+    memoryId: string,
+    userId: string,
+  ): Promise<StoredMemoryAccess | null>;
+  /** Viewer-scoped draft while open, full memory once locked, null when expired. */
+  getMemoryBySessionId(
+    sessionId: string,
+    viewerUserId: string,
+  ): Promise<MemoryResponse | null>;
+  getMemoryById(
+    memoryId: string,
+    viewerUserId: string,
+  ): Promise<MemoryResponse | null>;
+  listLockedMemoriesForUser(userId: string): Promise<MemoryListItem[]>;
+  addMemoryPhoto(
+    memoryId: string,
+    userId: string,
+    photoUrl: string,
+  ): Promise<MemoryPhoto>;
+  deleteMemoryPhoto(
+    memoryId: string,
+    userId: string,
+    photoId: string,
+  ): Promise<boolean>;
+  upsertMemorySong(
+    memoryId: string,
+    userId: string,
+    position: number,
+    input: MemorySongInput,
+  ): Promise<MemorySong>;
+  deleteMemorySong(
+    memoryId: string,
+    userId: string,
+    position: number,
+  ): Promise<boolean>;
+  /** Shared note — any member may write, last write wins. */
+  updateMemoryNote(
+    memoryId: string,
+    note: string | null,
+  ): Promise<StoredMemory | null>;
+  submitMemory(memoryId: string, userId: string): Promise<SubmitMemoryResult>;
+  /** Locks fully-submitted stale memories, expires the rest. Returns expired ones. */
+  expireStaleMemories(): Promise<ExpiredMemory[]>;
+
+  // Spotify
+  getSpotifyConnection(userId: string): Promise<StoredSpotifyConnection | null>;
+  upsertSpotifyConnection(
+    userId: string,
+    tokens: UpsertSpotifyConnectionInput,
+  ): Promise<StoredSpotifyConnection>;
+  deleteSpotifyConnection(userId: string): Promise<boolean>;
+  upsertMemoryPlaylist(
+    memoryId: string,
+    userId: string,
+    playlistId: string,
+    playlistUrl: string,
+  ): Promise<void>;
 }
 
 export function toIso(d: Date): string {

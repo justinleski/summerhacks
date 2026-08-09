@@ -5,12 +5,17 @@ import {
   type AlbumCover,
   type CoverContest,
   type MeProfile,
+  type MemoryResponse,
   type Session,
   type SessionCoversResponse,
 } from "@summerhacks/shared";
 import { api } from "../../lib/api";
 import { AlbumCoverEditor } from "../album/AlbumCoverEditor";
 import { CoverSpin } from "../album/CoverSpin";
+import { formatCountdown } from "../memories/format";
+
+/** `null` = no memory row (sessions from before Memories shipped). */
+type MemoryState = MemoryResponse | null;
 
 function formatRemaining(editableUntil: string): string {
   const ms = new Date(editableUntil).getTime() - Date.now();
@@ -53,10 +58,12 @@ export function SessionView() {
   const [covers, setCovers] = useState<AlbumCover[]>([]);
   const [mine, setMine] = useState<AlbumCover | null>(null);
   const [contest, setContest] = useState<CoverContest | null>(null);
+  const [memory, setMemory] = useState<MemoryState>(null);
   const [error, setError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [spinning, setSpinning] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const spinPlayedRef = useRef(false);
 
   const applyCovers = useCallback((res: SessionCoversResponse) => {
@@ -112,6 +119,19 @@ export function SessionView() {
         setError(err instanceof Error ? err.message : "Failed to load"),
       );
   }, [id, loadCovers]);
+
+  useEffect(() => {
+    if (!id) return;
+    // 404 here just means this session predates Memories, or the window expired.
+    api<{ memory: MemoryResponse }>(`/memories/session/${id}`)
+      .then((res) => setMemory(res.memory))
+      .catch(() => setMemory(null));
+  }, [id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Poll while editing/voting so peers' ready/votes show up without websockets.
   useEffect(() => {
@@ -198,6 +218,10 @@ export function SessionView() {
   const myVote = contest?.votes.find((v) => v.voterUserId === meId);
   const winner = covers.find((c) => c.userId === contest?.winnerUserId);
   const showReveal = phase === "voting" || phase === "resolved";
+  const msLeft = memory
+    ? new Date(memory.windowExpiresAt).getTime() - now
+    : 0;
+  const windowClosed = Boolean(memory) && msLeft <= 0;
 
   return (
     <main className="page session-page">
@@ -365,6 +389,55 @@ export function SessionView() {
           </p>
         )}
       </section>
+
+      {memory?.status === "open" && !windowClosed && (
+        <section className="stack-section memory-cta">
+          <h2>Memory of this hangout</h2>
+          <p className="lede">{formatCountdown(msLeft)} left</p>
+          <Link className="primary" to={`/memories/session/${session.id}`}>
+            Add photos + songs
+          </Link>
+          <ul className="plain-list">
+            {memory.members.map((m) => (
+              <li key={m.userId} className="row-item">
+                <span>
+                  {m.displayName}
+                  {m.isViewer ? " (you)" : ""}
+                </span>
+                <span className="member-meta">
+                  {m.isViewer
+                    ? m.submitted
+                      ? "you've submitted"
+                      : "still editing"
+                    : m.submitted
+                      ? "submitted"
+                      : "still writing"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {memory?.status === "locked" && (
+        <section className="stack-section memory-cta">
+          <h2>Memory locked</h2>
+          <Link className="primary" to={`/memories/${memory.id}`}>
+            View memory
+          </Link>
+        </section>
+      )}
+
+      {(!memory || windowClosed) && (
+        <section className="stack-section">
+          <h2>Memory</h2>
+          <p className="muted">
+            {windowClosed
+              ? "Memory window closed."
+              : "No memory for this session."}
+          </p>
+        </section>
+      )}
 
       <section className="payload">
         <h2>Shared info</h2>
