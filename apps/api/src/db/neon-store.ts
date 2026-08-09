@@ -1,20 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
-import { and, desc, eq, gt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import {
   MATCH_TIME_WINDOW_MS,
+  type ActivityNotification,
+  type CalendarEvent,
+  type EventComment,
+  type EventDetail,
+  type FriendSummary,
+  type RsvpStatus,
   type Session,
   type SessionPayload,
 } from "@summerhacks/shared";
+import { generateFriendCode, normalizeFriendCode } from "./friend-code.js";
 import * as schema from "./schema.js";
 import type {
   CreateBumpInput,
+  CreateEventInput,
+  InboxFriendRequest,
   StoredBumpIntent,
+  StoredFriendRequest,
   StoredUser,
   Store,
 } from "./types.js";
-import { toIso } from "./types.js";
+import { orderedFriendshipPair, toIso } from "./types.js";
 
 function mapUser(row: typeof schema.users.$inferSelect): StoredUser {
   return {
@@ -22,6 +32,10 @@ function mapUser(row: typeof schema.users.$inferSelect): StoredUser {
     displayName: row.displayName,
     avatarUrl: row.avatarUrl,
     deviceId: row.deviceId,
+    authUserId: row.authUserId,
+    email: row.email,
+    friendCode: row.friendCode ?? "",
+    bio: row.bio ?? null,
     createdAt: toIso(row.createdAt),
   };
 }
@@ -47,8 +61,20 @@ function mapBump(row: typeof schema.bumpIntents.$inferSelect): StoredBumpIntent 
   };
 }
 
+function mapFriendRequest(
+  row: typeof schema.friendRequests.$inferSelect,
+): StoredFriendRequest {
+  return {
+    id: row.id,
+    fromUserId: row.fromUserId,
+    toUserId: row.toUserId,
+    status: row.status as StoredFriendRequest["status"],
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 function placesSqlMatch(a: StoredBumpIntent): ReturnType<typeof and> {
-  // Neon HTTP driver needs explicit casts — untyped params become "could not determine data type of parameter $N"
   const serverMs = a.serverTimestamp.getTime();
   const geoCountry = a.geoCountry;
   const geoCity = a.geoCity;
@@ -79,9 +105,41 @@ function placesSqlMatch(a: StoredBumpIntent): ReturnType<typeof and> {
   );
 }
 
+function storeError(message: string, status: number): Error {
+  const err = new Error(message);
+  (err as Error & { status: number }).status = status;
+  return err;
+}
+
 export function createNeonStore(databaseUrl: string): Store {
   const sqlClient = neon(databaseUrl);
   const db = drizzle(sqlClient, { schema });
+
+  async function allocateFriendCode(): Promise<string> {
+    for (let i = 0; i < 20; i++) {
+      const code = generateFriendCode();
+      const [existing] = await db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.friendCode, code))
+        .limit(1);
+      if (!existing) return code;
+    }
+    throw new Error("Failed to allocate friend code");
+  }
+
+  async function ensureFriendCode(
+    row: typeof schema.users.$inferSelect,
+  ): Promise<StoredUser> {
+    if (row.friendCode) return mapUser(row);
+    const code = await allocateFriendCode();
+    const [updated] = await db
+      .update(schema.users)
+      .set({ friendCode: code })
+      .where(eq(schema.users.id, row.id))
+      .returning();
+    return mapUser(updated);
+  }
 
   async function expireIfNeeded(
     bump: StoredBumpIntent,
@@ -133,6 +191,200 @@ export function createNeonStore(databaseUrl: string): Store {
     };
   }
 
+  async function listFriendIds(userId: string): Promise<string[]> {
+    const rows = await db
+      .select()
+      .from(schema.friendships)
+      .where(
+        or(
+          eq(schema.friendships.userAId, userId),
+          eq(schema.friendships.userBId, userId),
+        ),
+      );
+    return rows.map((r) => (r.userAId === userId ? r.userBId : r.userAId));
+  }
+
+  async function areFriends(a: string, b: string): Promise<boolean> {
+    const { userAId, userBId } = orderedFriendshipPair(a, b);
+    const [row] = await db
+      .select()
+      .from(schema.friendships)
+      .where(
+        and(
+          eq(schema.friendships.userAId, userAId),
+          eq(schema.friendships.userBId, userBId),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
+  async function ensureSubscription(eventId: string, userId: string) {
+    await db
+      .insert(schema.eventSubscriptions)
+      .values({ eventId, userId })
+      .onConflictDoNothing();
+  }
+
+  async function insertActivity(
+    userId: string,
+    type: ActivityNotification["type"],
+    eventId: string,
+    actorUserId: string,
+    payload: Record<string, unknown>,
+  ) {
+    if (userId === actorUserId) return;
+    await db.insert(schema.activityNotifications).values({
+      userId,
+      type,
+      eventId,
+      actorUserId,
+      payload,
+    });
+  }
+
+  async function listSubscriberIds(eventId: string): Promise<string[]> {
+    const rows = await db
+      .select({ userId: schema.eventSubscriptions.userId })
+      .from(schema.eventSubscriptions)
+      .where(eq(schema.eventSubscriptions.eventId, eventId));
+    return rows.map((r) => r.userId);
+  }
+
+  async function myRsvp(
+    eventId: string,
+    userId: string,
+  ): Promise<RsvpStatus | null> {
+    const [row] = await db
+      .select()
+      .from(schema.eventAttendees)
+      .where(
+        and(
+          eq(schema.eventAttendees.eventId, eventId),
+          eq(schema.eventAttendees.userId, userId),
+        ),
+      )
+      .limit(1);
+    return row ? (row.status as RsvpStatus) : null;
+  }
+
+  function mapCalendarEvent(
+    event: typeof schema.events.$inferSelect,
+    hostDisplayName: string,
+    rsvp: RsvpStatus | null,
+  ): CalendarEvent {
+    return {
+      id: event.id,
+      hostUserId: event.hostUserId,
+      hostDisplayName,
+      title: event.title,
+      description: event.description,
+      imageUrl: event.imageUrl,
+      startsAt: toIso(event.startsAt),
+      endsAt: event.endsAt ? toIso(event.endsAt) : null,
+      createdAt: toIso(event.createdAt),
+      myRsvp: rsvp,
+    };
+  }
+
+  async function canSeeEvent(
+    viewerId: string,
+    event: typeof schema.events.$inferSelect,
+  ): Promise<boolean> {
+    if (event.hostUserId === viewerId) return true;
+
+    const [sub] = await db
+      .select()
+      .from(schema.eventSubscriptions)
+      .where(
+        and(
+          eq(schema.eventSubscriptions.eventId, event.id),
+          eq(schema.eventSubscriptions.userId, viewerId),
+        ),
+      )
+      .limit(1);
+    if (sub) return true;
+
+    if (await areFriends(viewerId, event.hostUserId)) return true;
+
+    const friendIds = await listFriendIds(viewerId);
+    if (friendIds.length === 0) return false;
+
+    const going = await db
+      .select()
+      .from(schema.eventAttendees)
+      .where(
+        and(
+          eq(schema.eventAttendees.eventId, event.id),
+          eq(schema.eventAttendees.status, "going"),
+          sql`${schema.eventAttendees.userId} = any(${friendIds}::uuid[])`,
+        ),
+      )
+      .limit(1);
+    return going.length > 0;
+  }
+
+  async function loadEventDetail(
+    viewerId: string,
+    eventId: string,
+  ): Promise<EventDetail | null> {
+    const [event] = await db
+      .select()
+      .from(schema.events)
+      .where(eq(schema.events.id, eventId))
+      .limit(1);
+    if (!event) return null;
+    if (!(await canSeeEvent(viewerId, event))) return null;
+
+    const [host] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, event.hostUserId))
+      .limit(1);
+
+    const attendeeRows = await db
+      .select({
+        attendee: schema.eventAttendees,
+        user: schema.users,
+      })
+      .from(schema.eventAttendees)
+      .innerJoin(schema.users, eq(schema.eventAttendees.userId, schema.users.id))
+      .where(eq(schema.eventAttendees.eventId, eventId));
+
+    const commentRows = await db
+      .select({
+        comment: schema.eventComments,
+        user: schema.users,
+      })
+      .from(schema.eventComments)
+      .innerJoin(schema.users, eq(schema.eventComments.userId, schema.users.id))
+      .where(eq(schema.eventComments.eventId, eventId))
+      .orderBy(schema.eventComments.createdAt);
+
+    const rsvp = await myRsvp(eventId, viewerId);
+
+    return {
+      ...mapCalendarEvent(event, host?.displayName ?? "Unknown", rsvp),
+      attendees: attendeeRows
+        .map(({ attendee, user }) => ({
+          userId: attendee.userId,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl,
+          status: attendee.status as RsvpStatus,
+          updatedAt: toIso(attendee.updatedAt),
+        }))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+      comments: commentRows.map(({ comment, user }) => ({
+        id: comment.id,
+        eventId: comment.eventId,
+        userId: comment.userId,
+        displayName: user.displayName,
+        body: comment.body,
+        createdAt: toIso(comment.createdAt),
+      })),
+    };
+  }
+
   return {
     async bootstrapUser({ displayName, deviceId }) {
       if (deviceId) {
@@ -142,20 +394,56 @@ export function createNeonStore(databaseUrl: string): Store {
           .where(eq(schema.users.deviceId, deviceId))
           .limit(1);
         if (existing) {
+          const withCode = await ensureFriendCode(existing);
           if (existing.displayName !== displayName) {
             const [updated] = await db
               .update(schema.users)
               .set({ displayName })
               .where(eq(schema.users.id, existing.id))
               .returning();
-            return mapUser(updated);
+            return mapUser({ ...updated, friendCode: withCode.friendCode });
           }
-          return mapUser(existing);
+          return withCode;
         }
       }
+      const friendCode = await allocateFriendCode();
       const [row] = await db
         .insert(schema.users)
-        .values({ displayName, deviceId: deviceId ?? null })
+        .values({ displayName, deviceId: deviceId ?? null, friendCode })
+        .returning();
+      return mapUser(row);
+    },
+
+    async upsertFromAuth(input) {
+      const [existing] = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.authUserId, input.authUserId))
+        .limit(1);
+      if (existing) {
+        const withCode = await ensureFriendCode(existing);
+        const [updated] = await db
+          .update(schema.users)
+          .set({
+            displayName: input.displayName || existing.displayName,
+            avatarUrl: input.avatarUrl ?? existing.avatarUrl,
+            email: input.email ?? existing.email,
+          })
+          .where(eq(schema.users.id, existing.id))
+          .returning();
+        return mapUser({ ...updated, friendCode: withCode.friendCode });
+      }
+      const friendCode = await allocateFriendCode();
+      const [row] = await db
+        .insert(schema.users)
+        .values({
+          displayName: input.displayName,
+          avatarUrl: input.avatarUrl ?? null,
+          email: input.email ?? null,
+          authUserId: input.authUserId,
+          deviceId: null,
+          friendCode,
+        })
         .returning();
       return mapUser(row);
     },
@@ -166,7 +454,16 @@ export function createNeonStore(databaseUrl: string): Store {
         .from(schema.users)
         .where(eq(schema.users.id, id))
         .limit(1);
-      return row ? mapUser(row) : null;
+      return row ? ensureFriendCode(row) : null;
+    },
+
+    async getUserByAuthId(authUserId) {
+      const [row] = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.authUserId, authUserId))
+        .limit(1);
+      return row ? ensureFriendCode(row) : null;
     },
 
     async findBumpByIdempotency(userId, idempotencyKey) {
@@ -311,7 +608,6 @@ export function createNeonStore(databaseUrl: string): Store {
         .returning();
 
       if (!matchedA) {
-        // Lost race; reload
         const reloaded = await this.getBump(bumpId);
         return {
           bump: reloaded!,
@@ -383,6 +679,493 @@ export function createNeonStore(databaseUrl: string): Store {
       }
 
       return loadSession(sessionId);
+    },
+
+    async updateProfile(userId, input) {
+      const existing = await this.getUser(userId);
+      if (!existing) throw storeError("User not found", 404);
+      const [updated] = await db
+        .update(schema.users)
+        .set({
+          displayName: input.displayName ?? existing.displayName,
+          bio: input.bio !== undefined ? input.bio : existing.bio,
+          avatarUrl:
+            input.avatarUrl !== undefined ? input.avatarUrl : existing.avatarUrl,
+        })
+        .where(eq(schema.users.id, userId))
+        .returning();
+      return mapUser(updated);
+    },
+
+    async getFriendsMe(userId) {
+      const me = await this.getUser(userId);
+      if (!me) throw storeError("User not found", 404);
+      const friendIds = await listFriendIds(userId);
+      const friends: FriendSummary[] = [];
+      for (const fid of friendIds) {
+        const u = await this.getUser(fid);
+        if (u) {
+          friends.push({
+            id: u.id,
+            displayName: u.displayName,
+            avatarUrl: u.avatarUrl,
+          });
+        }
+      }
+      friends.sort((a, b) => a.displayName.localeCompare(b.displayName));
+      return { friendCode: me.friendCode, friends };
+    },
+
+    async createFriendRequest(fromUserId, code) {
+      const normalized = normalizeFriendCode(code);
+      const [target] = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.friendCode, normalized))
+        .limit(1);
+      if (!target) throw storeError("Friend code not found", 404);
+      if (target.id === fromUserId) {
+        throw storeError("Cannot friend yourself", 400);
+      }
+      if (await areFriends(fromUserId, target.id)) {
+        throw storeError("Already friends", 409);
+      }
+
+      const pending = await db
+        .select()
+        .from(schema.friendRequests)
+        .where(
+          and(
+            eq(schema.friendRequests.status, "pending"),
+            or(
+              and(
+                eq(schema.friendRequests.fromUserId, fromUserId),
+                eq(schema.friendRequests.toUserId, target.id),
+              ),
+              and(
+                eq(schema.friendRequests.fromUserId, target.id),
+                eq(schema.friendRequests.toUserId, fromUserId),
+              ),
+            ),
+          ),
+        )
+        .limit(1);
+      if (pending.length > 0) {
+        throw storeError("Friend request already pending", 409);
+      }
+
+      const [row] = await db
+        .insert(schema.friendRequests)
+        .values({
+          fromUserId,
+          toUserId: target.id,
+          status: "pending",
+        })
+        .returning();
+      return mapFriendRequest(row);
+    },
+
+    async listFriendInbox(userId) {
+      const rows = await db
+        .select({
+          request: schema.friendRequests,
+          fromUser: schema.users,
+        })
+        .from(schema.friendRequests)
+        .innerJoin(
+          schema.users,
+          eq(schema.friendRequests.fromUserId, schema.users.id),
+        )
+        .where(
+          and(
+            eq(schema.friendRequests.toUserId, userId),
+            eq(schema.friendRequests.status, "pending"),
+          ),
+        )
+        .orderBy(desc(schema.friendRequests.createdAt));
+
+      return rows.map(({ request, fromUser }): InboxFriendRequest => ({
+        id: request.id,
+        fromUserId: request.fromUserId,
+        toUserId: request.toUserId,
+        status: request.status as InboxFriendRequest["status"],
+        createdAt: toIso(request.createdAt),
+        updatedAt: toIso(request.updatedAt),
+        fromUser: {
+          id: fromUser.id,
+          displayName: fromUser.displayName,
+          avatarUrl: fromUser.avatarUrl,
+        },
+      }));
+    },
+
+    async acceptFriendRequest(userId, requestId) {
+      const [req] = await db
+        .select()
+        .from(schema.friendRequests)
+        .where(eq(schema.friendRequests.id, requestId))
+        .limit(1);
+      if (!req || req.toUserId !== userId) {
+        throw storeError("Friend request not found", 404);
+      }
+      if (req.status !== "pending") {
+        throw storeError("Friend request is not pending", 409);
+      }
+
+      const [updated] = await db
+        .update(schema.friendRequests)
+        .set({ status: "accepted", updatedAt: new Date() })
+        .where(eq(schema.friendRequests.id, requestId))
+        .returning();
+
+      const pair = orderedFriendshipPair(req.fromUserId, req.toUserId);
+      await db
+        .insert(schema.friendships)
+        .values({ userAId: pair.userAId, userBId: pair.userBId })
+        .onConflictDoNothing();
+
+      return mapFriendRequest(updated);
+    },
+
+    async rejectFriendRequest(userId, requestId) {
+      const [req] = await db
+        .select()
+        .from(schema.friendRequests)
+        .where(eq(schema.friendRequests.id, requestId))
+        .limit(1);
+      if (!req || req.toUserId !== userId) {
+        throw storeError("Friend request not found", 404);
+      }
+      if (req.status !== "pending") {
+        throw storeError("Friend request is not pending", 409);
+      }
+      const [updated] = await db
+        .update(schema.friendRequests)
+        .set({ status: "rejected", updatedAt: new Date() })
+        .where(eq(schema.friendRequests.id, requestId))
+        .returning();
+      return mapFriendRequest(updated);
+    },
+
+    async unfriend(userId, otherUserId) {
+      const pair = orderedFriendshipPair(userId, otherUserId);
+      const deleted = await db
+        .delete(schema.friendships)
+        .where(
+          and(
+            eq(schema.friendships.userAId, pair.userAId),
+            eq(schema.friendships.userBId, pair.userBId),
+          ),
+        )
+        .returning();
+      return deleted.length > 0;
+    },
+
+    async createEvent(input: CreateEventInput) {
+      const now = new Date();
+      const [event] = await db
+        .insert(schema.events)
+        .values({
+          hostUserId: input.hostUserId,
+          title: input.title,
+          description: input.description,
+          imageUrl: input.imageUrl,
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+          createdAt: now,
+        })
+        .returning();
+
+      await db.insert(schema.eventAttendees).values({
+        eventId: event.id,
+        userId: input.hostUserId,
+        status: "going",
+        updatedAt: now,
+      });
+      await ensureSubscription(event.id, input.hostUserId);
+
+      const friends = await listFriendIds(input.hostUserId);
+      for (const fid of friends) {
+        await ensureSubscription(event.id, fid);
+        await insertActivity(fid, "event_published", event.id, input.hostUserId, {
+          title: event.title,
+          startsAt: toIso(event.startsAt),
+        });
+      }
+
+      const host = await this.getUser(input.hostUserId);
+      return mapCalendarEvent(event, host?.displayName ?? "Unknown", "going");
+    },
+
+    async listCalendar(userId) {
+      const friendIds = await listFriendIds(userId);
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      // Hosted by me
+      const hosted = await db
+        .select({ event: schema.events, host: schema.users })
+        .from(schema.events)
+        .innerJoin(schema.users, eq(schema.events.hostUserId, schema.users.id))
+        .where(
+          and(
+            eq(schema.events.hostUserId, userId),
+            gt(schema.events.startsAt, cutoff),
+          ),
+        );
+
+      // Hosted by friends
+      const fromFriends =
+        friendIds.length > 0
+          ? await db
+              .select({ event: schema.events, host: schema.users })
+              .from(schema.events)
+              .innerJoin(
+                schema.users,
+                eq(schema.events.hostUserId, schema.users.id),
+              )
+              .where(
+                and(
+                  sql`${schema.events.hostUserId} = any(${friendIds}::uuid[])`,
+                  gt(schema.events.startsAt, cutoff),
+                ),
+              )
+          : [];
+
+      // Explicit subscriptions
+      const subscribed = await db
+        .select({ event: schema.events, host: schema.users })
+        .from(schema.eventSubscriptions)
+        .innerJoin(
+          schema.events,
+          eq(schema.eventSubscriptions.eventId, schema.events.id),
+        )
+        .innerJoin(schema.users, eq(schema.events.hostUserId, schema.users.id))
+        .where(
+          and(
+            eq(schema.eventSubscriptions.userId, userId),
+            gt(schema.events.startsAt, cutoff),
+          ),
+        );
+
+      // FOAF: friend is going
+      const foaf =
+        friendIds.length > 0
+          ? await db
+              .select({ event: schema.events, host: schema.users })
+              .from(schema.eventAttendees)
+              .innerJoin(
+                schema.events,
+                eq(schema.eventAttendees.eventId, schema.events.id),
+              )
+              .innerJoin(
+                schema.users,
+                eq(schema.events.hostUserId, schema.users.id),
+              )
+              .where(
+                and(
+                  eq(schema.eventAttendees.status, "going"),
+                  sql`${schema.eventAttendees.userId} = any(${friendIds}::uuid[])`,
+                  gt(schema.events.startsAt, cutoff),
+                ),
+              )
+          : [];
+
+      const byId = new Map<string, { event: typeof schema.events.$inferSelect; hostName: string }>();
+      for (const group of [hosted, fromFriends, subscribed, foaf]) {
+        for (const { event, host } of group) {
+          byId.set(event.id, { event, hostName: host.displayName });
+        }
+      }
+
+      const result: CalendarEvent[] = [];
+      for (const { event, hostName } of byId.values()) {
+        const rsvp = await myRsvp(event.id, userId);
+        result.push(mapCalendarEvent(event, hostName, rsvp));
+      }
+      return result.sort(
+        (a, b) =>
+          new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
+      );
+    },
+
+    async getEventDetail(userId, eventId) {
+      return loadEventDetail(userId, eventId);
+    },
+
+    async rsvpEvent(userId, eventId, status) {
+      const [event] = await db
+        .select()
+        .from(schema.events)
+        .where(eq(schema.events.id, eventId))
+        .limit(1);
+      if (!event) return null;
+      if (!(await canSeeEvent(userId, event))) return null;
+
+      const now = new Date();
+      await db
+        .insert(schema.eventAttendees)
+        .values({
+          eventId,
+          userId,
+          status,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [schema.eventAttendees.eventId, schema.eventAttendees.userId],
+          set: { status, updatedAt: now },
+        });
+
+      await ensureSubscription(eventId, userId);
+
+      const subscribers = await listSubscriberIds(eventId);
+      for (const sid of subscribers) {
+        await insertActivity(sid, "rsvp_changed", eventId, userId, {
+          status,
+          title: event.title,
+        });
+      }
+
+      if (status === "going") {
+        const friends = await listFriendIds(userId);
+        for (const fid of friends) {
+          const [existing] = await db
+            .select()
+            .from(schema.eventSubscriptions)
+            .where(
+              and(
+                eq(schema.eventSubscriptions.eventId, eventId),
+                eq(schema.eventSubscriptions.userId, fid),
+              ),
+            )
+            .limit(1);
+          if (existing) continue;
+          await ensureSubscription(eventId, fid);
+          await insertActivity(fid, "event_published", eventId, userId, {
+            title: event.title,
+            startsAt: toIso(event.startsAt),
+            via: "foaf_attendance",
+          });
+        }
+      }
+
+      return loadEventDetail(userId, eventId);
+    },
+
+    async addEventComment(userId, eventId, body) {
+      const [event] = await db
+        .select()
+        .from(schema.events)
+        .where(eq(schema.events.id, eventId))
+        .limit(1);
+      if (!event || !(await canSeeEvent(userId, event))) {
+        throw storeError("Event not found", 404);
+      }
+
+      await ensureSubscription(eventId, userId);
+      const [comment] = await db
+        .insert(schema.eventComments)
+        .values({ eventId, userId, body })
+        .returning();
+
+      const subscribers = await listSubscriberIds(eventId);
+      for (const sid of subscribers) {
+        await insertActivity(sid, "event_comment", eventId, userId, {
+          body,
+          title: event.title,
+        });
+      }
+
+      const user = await this.getUser(userId);
+      const result: EventComment = {
+        id: comment.id,
+        eventId: comment.eventId,
+        userId: comment.userId,
+        displayName: user?.displayName ?? "Unknown",
+        body: comment.body,
+        createdAt: toIso(comment.createdAt),
+      };
+      return result;
+    },
+
+    async listActivity(userId) {
+      const rows = await db
+        .select({
+          notification: schema.activityNotifications,
+          actor: schema.users,
+        })
+        .from(schema.activityNotifications)
+        .innerJoin(
+          schema.users,
+          eq(schema.activityNotifications.actorUserId, schema.users.id),
+        )
+        .where(eq(schema.activityNotifications.userId, userId))
+        .orderBy(desc(schema.activityNotifications.createdAt))
+        .limit(100);
+
+      return rows.map(({ notification, actor }) => ({
+        id: notification.id,
+        type: notification.type as ActivityNotification["type"],
+        eventId: notification.eventId,
+        actorUserId: notification.actorUserId,
+        actorDisplayName: actor.displayName,
+        payload: notification.payload ?? {},
+        createdAt: toIso(notification.createdAt),
+        readAt: notification.readAt ? toIso(notification.readAt) : null,
+      }));
+    },
+
+    async markActivityRead(userId, notificationId) {
+      const [row] = await db
+        .select({
+          notification: schema.activityNotifications,
+          actor: schema.users,
+        })
+        .from(schema.activityNotifications)
+        .innerJoin(
+          schema.users,
+          eq(schema.activityNotifications.actorUserId, schema.users.id),
+        )
+        .where(
+          and(
+            eq(schema.activityNotifications.id, notificationId),
+            eq(schema.activityNotifications.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (!row) return null;
+
+      const now = new Date();
+      const [updated] = await db
+        .update(schema.activityNotifications)
+        .set({ readAt: row.notification.readAt ?? now })
+        .where(eq(schema.activityNotifications.id, notificationId))
+        .returning();
+
+      return {
+        id: updated.id,
+        type: updated.type as ActivityNotification["type"],
+        eventId: updated.eventId,
+        actorUserId: updated.actorUserId,
+        actorDisplayName: row.actor.displayName,
+        payload: updated.payload ?? {},
+        createdAt: toIso(updated.createdAt),
+        readAt: updated.readAt ? toIso(updated.readAt) : null,
+      };
+    },
+
+    async markAllActivityRead(userId) {
+      const now = new Date();
+      const updated = await db
+        .update(schema.activityNotifications)
+        .set({ readAt: now })
+        .where(
+          and(
+            eq(schema.activityNotifications.userId, userId),
+            sql`${schema.activityNotifications.readAt} is null`,
+          ),
+        )
+        .returning();
+      return updated.length;
     },
   };
 }

@@ -10,6 +10,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@neondatabase/neon-js": "^0.6.2-beta",
     "@summerhacks/shared": "*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

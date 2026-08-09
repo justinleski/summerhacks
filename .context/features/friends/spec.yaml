@@ -1,0 +1,54 @@
+id: friends
+version: 0.1.0
+name: Friends
+status: implemented
+summary: >
+  Discord-style friend codes and inbox. Accepting a friend is bidirectional and
+  auto-subscribes both sides to each other's published calendar events (follow = friendship).
+
+goals:
+  - Unique shareable friend_code per user
+  - Pending friend requests with Accept / Reject
+  - Canonical bidirectional friendships
+  - Unfriend support
+  - Auto-subscribe to friends' published events (calendar fan-out)
+
+non_goals:
+  - Follow without friendship
+  - Public user search / discovery directory
+  - Push notifications
+
+constraints:
+  auth: requireAuth on all mutating + read routes
+  delivery: in-app activity + calendar poll
+
+data_model:
+  - users.friend_code
+  - friend_requests (pending|accepted|rejected)
+  - friendships (user_a_id < user_b_id)
+
+apis:
+  - method: GET
+    path: /api/friends/me
+  - method: POST
+    path: /api/friends/requests
+    body: [code]
+  - method: GET
+    path: /api/friends/inbox
+  - method: POST
+    path: /api/friends/requests/:id/accept
+  - method: POST
+    path: /api/friends/requests/:id/reject
+  - method: DELETE
+    path: /api/friends/:userId
+
+ux:
+  routes:
+    - /friends
+  home_nav: Friends
+
+related_docs:
+  - docs/friends/overview.md
+  - docs/friends/api.md
+  - docs/friends/data-model.md
+  - .context/features/friends/BRIEFING.md
