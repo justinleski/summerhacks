@@ -151,3 +151,5 @@ packages/*/dist/
 
 # Local screenshot scratch
 .tmp-shots/
+.tmp
+

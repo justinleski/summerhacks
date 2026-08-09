@@ -98,7 +98,7 @@ ops:
     - CRON_SECRET
     - BLOB_READ_WRITE_TOKEN
     - ALBUM_EDIT_WINDOW_MS
-  cron: vercel.json crons → /api/internal/sweep-memories every 15 min (GET)
+  cron: vercel.json crons → /api/internal/sweep-memories daily `0 4 * * *` (Hobby limit)
   schema: npm run db:push -w @summerhacks/api
   degradation: >
     No Spotify vars → song paste and playlist export 503, everything else works.

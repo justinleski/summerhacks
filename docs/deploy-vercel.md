@@ -18,7 +18,7 @@ Browser
                                        └─ Vercel Blob (BLOB_READ_WRITE_TOKEN, optional)
                                        └─ Spotify Web API (SPOTIFY_*, optional)
 
-Vercel Cron ──GET──> /api/internal/sweep-memories (every 15 min)
+Vercel Cron ──GET──> /api/internal/sweep-memories (daily on Hobby: `0 4 * * *`)
 ```
 
 | Concern | Where | Notes |
@@ -152,8 +152,10 @@ npx vercel env add CRON_SECRET preview            # 16+ random chars
 `vercel.json` registers the sweeper:
 
 ```json
-"crons": [{ "path": "/api/internal/sweep-memories", "schedule": "*/15 * * * *" }]
+"crons": [{ "path": "/api/internal/sweep-memories", "schedule": "0 4 * * *" }]
 ```
+
+(Hobby allows at most one run per day. Use Pro or an external scheduler with `x-cron-secret` for tighter sweeps.)
 
 Vercel Cron issues a **GET** (both GET and POST are registered) and, once `CRON_SECRET` exists on the project, sends it as `Authorization: Bearer <CRON_SECRET>`. Manual run:
 
