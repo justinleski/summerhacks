@@ -10,6 +10,7 @@ import {
   type Session,
   type SessionCoversResponse,
 } from "@summerhacks/shared";
+import { OceanShaderCanvas } from "../../components/ambient/OceanShaderCanvas";
 import { api } from "../../lib/api";
 import {
   clientCacheKeys,
@@ -296,6 +297,7 @@ export function SessionView() {
 
   return (
     <main className="page session-page">
+      <OceanShaderCanvas />
       <p className="eyebrow">Shared session</p>
       <h1>Connected</h1>
       <p className="lede">

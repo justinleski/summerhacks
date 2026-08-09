@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type {
   MemoryPhoto,
   MemoryPhotoUploadResponse,
@@ -9,6 +10,7 @@ const DEVICE_KEY = "summerhacks.deviceId";
 const NAME_KEY = "summerhacks.displayName";
 const MODE_KEY = "summerhacks.authMode"; // "neon" | "guest"
 const NEEDS_NAME_KEY = "summerhacks.needsName";
+const AUTH_CHANGED_EVENT = "summerhacks:auth-changed";
 
 export function getDeviceId(): string {
   let id = localStorage.getItem(DEVICE_KEY);
@@ -36,6 +38,7 @@ export function setAuth(
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(NAME_KEY, displayName);
   localStorage.setItem(MODE_KEY, mode);
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
 export function clearAuth() {
@@ -43,6 +46,7 @@ export function clearAuth() {
   localStorage.removeItem(NAME_KEY);
   localStorage.removeItem(MODE_KEY);
   localStorage.removeItem(NEEDS_NAME_KEY);
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
 export function getDisplayName(): string {
@@ -57,6 +61,21 @@ export function getNeedsName(): boolean {
 export function setNeedsName(needs: boolean) {
   if (needs) localStorage.setItem(NEEDS_NAME_KEY, "1");
   else localStorage.removeItem(NEEDS_NAME_KEY);
+}
+
+/** Reactive auth check for shared chrome (e.g. StarNav) that persists across route changes. */
+export function useIsAuthenticated(): boolean {
+  const [authed, setAuthed] = useState(() => Boolean(getToken()));
+  useEffect(() => {
+    const update = () => setAuthed(Boolean(getToken()));
+    window.addEventListener(AUTH_CHANGED_EVENT, update);
+    window.addEventListener("storage", update);
+    return () => {
+      window.removeEventListener(AUTH_CHANGED_EVENT, update);
+      window.removeEventListener("storage", update);
+    };
+  }, []);
+  return authed;
 }
 
 async function resolveBearerToken(): Promise<string | null> {

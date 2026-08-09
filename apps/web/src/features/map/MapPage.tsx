@@ -10,8 +10,8 @@ import {
 import { api, uploadCheckinPhoto } from "../../lib/api";
 import {
   CARTO_ATTRIBUTION,
-  CARTO_LIGHT_URL,
   checkinIcon,
+  currentCartoTileUrl,
   friendCheckinIcon,
   meIcon,
 } from "./mapConfig";
@@ -154,7 +154,7 @@ export function MapPage() {
               scrollWheelZoom
               style={{ height: "100%", width: "100%" }}
             >
-            <TileLayer url={CARTO_LIGHT_URL} attribution={CARTO_ATTRIBUTION} />
+            <TileLayer url={currentCartoTileUrl()} attribution={CARTO_ATTRIBUTION} />
             <Marker position={center} icon={meIcon}>
               <Popup>You are here</Popup>
             </Marker>
