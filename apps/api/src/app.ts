@@ -9,6 +9,7 @@ import { checkinsRoutes } from "./routes/checkins.js";
 import { eventsRoutes } from "./routes/events.js";
 import { friendsRoutes } from "./routes/friends.js";
 import { sessionsRoutes } from "./routes/sessions.js";
+import { tallyRoutes } from "./routes/tally.js";
 import { uploadsRoutes } from "./routes/uploads.js";
 import { usersRoutes } from "./routes/users.js";
 
@@ -29,6 +30,9 @@ app.get("/health", (c) =>
     store: process.env.DATABASE_URL ? "neon" : "memory",
   }),
 );
+
+// Public — no requireAuth, mounted here alongside /health before any auth-guarded routes.
+app.route("/tally", tallyRoutes);
 
 app.route("/users", usersRoutes);
 app.route("/bumps", bumpsRoutes);

@@ -23,7 +23,7 @@ async function uploadImage(
     json: (body: unknown, status?: number) => Response;
     get: (key: "userId") => string;
   },
-  folder: "events" | "avatars" | "checkins",
+  folder: "events" | "avatars" | "checkins" | "event-photos",
   missingTokenMessage: string,
 ) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
@@ -90,5 +90,13 @@ uploadsRoutes.post("/checkin-photo", async (c) =>
     c,
     "checkins",
     "Image uploads are not configured (BLOB_READ_WRITE_TOKEN unset). Check in without a photo, or set the token.",
+  ),
+);
+
+uploadsRoutes.post("/event-photo", async (c) =>
+  uploadImage(
+    c,
+    "event-photos",
+    "Image uploads are not configured (BLOB_READ_WRITE_TOKEN unset). Set the token to add event photos.",
   ),
 );

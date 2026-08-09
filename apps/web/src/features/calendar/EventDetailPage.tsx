@@ -3,16 +3,37 @@ import { Link, useParams } from "react-router-dom";
 import {
   ACTIVITY_POLL_INTERVAL_MS,
   type EventDetail,
+  type EventPhoto,
+  type MeProfile,
   type RsvpStatus,
 } from "@summerhacks/shared";
-import { api } from "../../lib/api";
+import { api, uploadEventPhoto } from "../../lib/api";
 
 export function EventDetailPage() {
   const { id } = useParams();
   const [event, setEvent] = useState<EventDetail | null>(null);
+  const [myId, setMyId] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<EventPhoto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [comment, setComment] = useState("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoInputKey, setPhotoInputKey] = useState(0);
+  const [photoBusy, setPhotoBusy] = useState(false);
+
+  useEffect(() => {
+    api<MeProfile>("/users/me")
+      .then((me) => setMyId(me.id))
+      .catch(() => undefined);
+  }, []);
+
+  const isHost = Boolean(myId && event && myId === event.hostUserId);
+  const isPast = Boolean(
+    event &&
+      new Date(event.endsAt ?? event.startsAt).getTime() <= Date.now(),
+  );
+  const canUpload = isHost && isPast;
+  const canViewPhotos = isHost || event?.myRsvp === "going";
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -33,6 +54,37 @@ export function EventDetailPage() {
     }, ACTIVITY_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [id, load]);
+
+  useEffect(() => {
+    if (!id || !canViewPhotos) {
+      setPhotos([]);
+      return;
+    }
+    api<{ photos: EventPhoto[] }>(`/events/${id}/photos`)
+      .then((res) => setPhotos(res.photos))
+      .catch(() => undefined);
+  }, [id, canViewPhotos]);
+
+  async function submitPhoto(e: FormEvent) {
+    e.preventDefault();
+    if (!id || !photoFile) return;
+    setPhotoBusy(true);
+    setError(null);
+    try {
+      const photoUrl = await uploadEventPhoto(photoFile);
+      const res = await api<{ photo: EventPhoto }>(`/events/${id}/photos`, {
+        method: "POST",
+        body: JSON.stringify({ photoUrl }),
+      });
+      setPhotos((prev) => [res.photo, ...prev]);
+      setPhotoFile(null);
+      setPhotoInputKey((k) => k + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Photo upload failed");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
 
   async function rsvp(status: RsvpStatus) {
     if (!id) return;
@@ -147,6 +199,38 @@ export function EventDetailPage() {
           ))}
         </ul>
       </section>
+
+      {canViewPhotos && (
+        <section className="stack-section">
+          <h2>Photos</h2>
+          {canUpload && (
+            <form className="inline-form" onSubmit={submitPhoto}>
+              <input
+                key={photoInputKey}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+              />
+              <button
+                type="submit"
+                className="primary"
+                disabled={photoBusy || !photoFile}
+              >
+                {photoBusy ? "Adding…" : "Add photo"}
+              </button>
+            </form>
+          )}
+          {photos.length === 0 ? (
+            <p className="muted">No photos yet.</p>
+          ) : (
+            <div className="photo-grid">
+              {photos.map((p) => (
+                <img key={p.id} src={p.photoUrl} alt="" />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="stack-section">
         <h2>Comments</h2>

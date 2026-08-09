@@ -1,8 +1,12 @@
 import { Hono } from "hono";
-import { createFriendRequestBodySchema } from "@summerhacks/shared";
+import {
+  createFriendRequestBodySchema,
+  setFriendshipWatchlistBodySchema,
+} from "@summerhacks/shared";
 import { getStore } from "../db/index.js";
 import { toIso } from "../db/types.js";
 import { requireAuth, type AuthVariables } from "../middleware/auth.js";
+import { geoFromRequest } from "../services/geoFromRequest.js";
 import { httpErrorFromStore } from "./http-errors.js";
 
 export const friendsRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -44,9 +48,12 @@ friendsRoutes.get("/inbox", async (c) => {
 
 friendsRoutes.post("/requests/:id/accept", async (c) => {
   try {
+    const geo = geoFromRequest(c);
+    const region = geo.city ?? geo.region ?? geo.country ?? "Unknown";
     const request = await getStore().acceptFriendRequest(
       c.get("userId"),
       c.req.param("id"),
+      region,
     );
     return c.json({
       id: request.id,
@@ -88,4 +95,16 @@ friendsRoutes.delete("/:userId", async (c) => {
   const ok = await getStore().unfriend(c.get("userId"), otherUserId);
   if (!ok) return c.json({ error: "Not friends" }, 404);
   return c.json({ ok: true });
+});
+
+friendsRoutes.patch("/:userId/watchlist", async (c) => {
+  const body = setFriendshipWatchlistBodySchema.parse(await c.req.json());
+  const otherUserId = c.req.param("userId");
+  const ok = await getStore().setFriendshipWatchlist(
+    c.get("userId"),
+    otherUserId,
+    body.isWatchlisted,
+  );
+  if (!ok) return c.json({ error: "Not friends" }, 404);
+  return c.json({ ok: true, isWatchlisted: body.isWatchlisted });
 });

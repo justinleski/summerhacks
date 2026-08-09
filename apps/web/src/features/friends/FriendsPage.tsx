@@ -73,6 +73,22 @@ export function FriendsPage() {
     }
   }
 
+  async function toggleWatchlist(userId: string, next: boolean) {
+    setError(null);
+    setBusy(true);
+    try {
+      await api(`/friends/${userId}/watchlist`, {
+        method: "PATCH",
+        body: JSON.stringify({ isWatchlisted: next }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Watchlist update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copyCode() {
     if (!me?.friendCode) return;
     try {
@@ -169,14 +185,30 @@ export function FriendsPage() {
             {me.friends.map((f) => (
               <li key={f.id} className="row-item">
                 <span>{f.displayName}</span>
-                <button
-                  type="button"
-                  className="ghost"
-                  disabled={busy}
-                  onClick={() => void removeFriend(f.id)}
-                >
-                  Unfriend
-                </button>
+                <span className="row-actions">
+                  <Link className="text-link" to={`/friends/${f.id}/map`}>
+                    Map
+                  </Link>
+                  <label className="watchlist-toggle">
+                    <input
+                      type="checkbox"
+                      checked={f.isWatchlisted}
+                      disabled={busy}
+                      onChange={(e) =>
+                        void toggleWatchlist(f.id, e.target.checked)
+                      }
+                    />
+                    Watchlist
+                  </label>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={busy}
+                    onClick={() => void removeFriend(f.id)}
+                  >
+                    Unfriend
+                  </button>
+                </span>
               </li>
             ))}
           </ul>

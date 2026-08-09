@@ -203,6 +203,9 @@ export function HomePage() {
           </button>
         </form>
         {error && <p className="error">{error}</p>}
+        <Link className="text-link" to="/explore">
+          Or view public activity, no login needed →
+        </Link>
       </main>
     );
   }
@@ -228,6 +231,7 @@ export function HomePage() {
         <Link to="/friends">Friends</Link>
         <Link to="/calendar">Calendar</Link>
         <Link to="/map">Map</Link>
+        <Link to="/explore">Explore</Link>
         <Link to="/profile">Profile</Link>
       </nav>
 

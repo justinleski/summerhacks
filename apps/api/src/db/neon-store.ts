@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
-import { and, desc, eq, gt, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import {
   MATCH_TIME_WINDOW_MS,
+  TALLY_WINDOW_DAYS,
   type ActivityNotification,
   type CalendarEvent,
   type EventComment,
   type EventDetail,
-  type FriendSummary,
+  type FriendListEntry,
   type RsvpStatus,
   type Session,
   type SessionPayload,
@@ -19,12 +20,16 @@ import type {
   CreateBumpInput,
   CreateCheckinInput,
   CreateEventInput,
+  CreateEventPhotoInput,
   InboxFriendRequest,
   StoredBumpIntent,
   StoredCheckin,
+  StoredEventPhoto,
+  StoredFriendCheckin,
   StoredFriendRequest,
   StoredUser,
   Store,
+  TallyRegionCount,
 } from "./types.js";
 import { orderedFriendshipPair, toIso } from "./types.js";
 
@@ -72,6 +77,17 @@ function mapCheckin(row: typeof schema.checkins.$inferSelect): StoredCheckin {
     region: row.region,
     photoUrl: row.photoUrl,
     caption: row.caption,
+    createdAt: row.createdAt,
+  };
+}
+
+function mapEventPhoto(
+  row: typeof schema.eventPhotos.$inferSelect,
+): StoredEventPhoto {
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    photoUrl: row.photoUrl,
     createdAt: row.createdAt,
   };
 }
@@ -332,7 +348,7 @@ export function createNeonStore(databaseUrl: string): Store {
         and(
           eq(schema.eventAttendees.eventId, event.id),
           eq(schema.eventAttendees.status, "going"),
-          sql`${schema.eventAttendees.userId} = any(${friendIds}::uuid[])`,
+          inArray(schema.eventAttendees.userId, friendIds),
         ),
       )
       .limit(1);
@@ -716,7 +732,21 @@ export function createNeonStore(databaseUrl: string): Store {
       const me = await this.getUser(userId);
       if (!me) throw storeError("User not found", 404);
       const friendIds = await listFriendIds(userId);
-      const friends: FriendSummary[] = [];
+      const friendshipRows = await db
+        .select()
+        .from(schema.friendships)
+        .where(
+          or(
+            eq(schema.friendships.userAId, userId),
+            eq(schema.friendships.userBId, userId),
+          ),
+        );
+      const watchlistByFriendId = new Map<string, boolean>();
+      for (const row of friendshipRows) {
+        const otherId = row.userAId === userId ? row.userBId : row.userAId;
+        watchlistByFriendId.set(otherId, row.isWatchlisted);
+      }
+      const friends: FriendListEntry[] = [];
       for (const fid of friendIds) {
         const u = await this.getUser(fid);
         if (u) {
@@ -724,6 +754,7 @@ export function createNeonStore(databaseUrl: string): Store {
             id: u.id,
             displayName: u.displayName,
             avatarUrl: u.avatarUrl,
+            isWatchlisted: watchlistByFriendId.get(fid) ?? false,
           });
         }
       }
@@ -814,7 +845,7 @@ export function createNeonStore(databaseUrl: string): Store {
       }));
     },
 
-    async acceptFriendRequest(userId, requestId) {
+    async acceptFriendRequest(userId, requestId, region) {
       const [req] = await db
         .select()
         .from(schema.friendRequests)
@@ -838,6 +869,11 @@ export function createNeonStore(databaseUrl: string): Store {
         .insert(schema.friendships)
         .values({ userAId: pair.userAId, userBId: pair.userBId })
         .onConflictDoNothing();
+
+      await db.insert(schema.connections).values({
+        type: "friend_add",
+        region,
+      });
 
       return mapFriendRequest(updated);
     },
@@ -874,6 +910,21 @@ export function createNeonStore(databaseUrl: string): Store {
         )
         .returning();
       return deleted.length > 0;
+    },
+
+    async setFriendshipWatchlist(userId, friendId, isWatchlisted) {
+      const pair = orderedFriendshipPair(userId, friendId);
+      const updated = await db
+        .update(schema.friendships)
+        .set({ isWatchlisted })
+        .where(
+          and(
+            eq(schema.friendships.userAId, pair.userAId),
+            eq(schema.friendships.userBId, pair.userBId),
+          ),
+        )
+        .returning();
+      return updated.length > 0;
     },
 
     async createEvent(input: CreateEventInput) {
@@ -940,7 +991,7 @@ export function createNeonStore(databaseUrl: string): Store {
               )
               .where(
                 and(
-                  sql`${schema.events.hostUserId} = any(${friendIds}::uuid[])`,
+                  inArray(schema.events.hostUserId, friendIds),
                   gt(schema.events.startsAt, cutoff),
                 ),
               )
@@ -979,7 +1030,7 @@ export function createNeonStore(databaseUrl: string): Store {
               .where(
                 and(
                   eq(schema.eventAttendees.status, "going"),
-                  sql`${schema.eventAttendees.userId} = any(${friendIds}::uuid[])`,
+                  inArray(schema.eventAttendees.userId, friendIds),
                   gt(schema.events.startsAt, cutoff),
                 ),
               )
@@ -1007,7 +1058,7 @@ export function createNeonStore(databaseUrl: string): Store {
       return loadEventDetail(userId, eventId);
     },
 
-    async rsvpEvent(userId, eventId, status) {
+    async rsvpEvent(userId, eventId, status, region) {
       const [event] = await db
         .select()
         .from(schema.events)
@@ -1061,6 +1112,11 @@ export function createNeonStore(databaseUrl: string): Store {
             via: "foaf_attendance",
           });
         }
+
+        await db.insert(schema.connections).values({
+          type: "event_join",
+          region,
+        });
       }
 
       return loadEventDetail(userId, eventId);
@@ -1100,6 +1156,23 @@ export function createNeonStore(databaseUrl: string): Store {
         createdAt: toIso(comment.createdAt),
       };
       return result;
+    },
+
+    async addEventPhoto(input: CreateEventPhotoInput) {
+      const [row] = await db
+        .insert(schema.eventPhotos)
+        .values({ eventId: input.eventId, photoUrl: input.photoUrl })
+        .returning();
+      return mapEventPhoto(row);
+    },
+
+    async listEventPhotos(eventId) {
+      const rows = await db
+        .select()
+        .from(schema.eventPhotos)
+        .where(eq(schema.eventPhotos.eventId, eventId))
+        .orderBy(desc(schema.eventPhotos.createdAt));
+      return rows.map(mapEventPhoto);
     },
 
     async listActivity(userId) {
@@ -1200,7 +1273,7 @@ export function createNeonStore(databaseUrl: string): Store {
 
       await db.insert(schema.connections).values({
         type: "checkin",
-        region: input.region,
+        region: input.connectionRegion,
         createdAt: now,
       });
 
@@ -1214,6 +1287,97 @@ export function createNeonStore(databaseUrl: string): Store {
         .where(eq(schema.checkins.userId, userId))
         .orderBy(desc(schema.checkins.createdAt));
       return rows.map(mapCheckin);
+    },
+
+    async listFriendCheckins(userId) {
+      const friendIds = await listFriendIds(userId);
+      if (friendIds.length === 0) return [];
+
+      const watchlistedRows = await db
+        .select({
+          userAId: schema.friendships.userAId,
+          userBId: schema.friendships.userBId,
+        })
+        .from(schema.friendships)
+        .where(
+          and(
+            or(
+              eq(schema.friendships.userAId, userId),
+              eq(schema.friendships.userBId, userId),
+            ),
+            eq(schema.friendships.isWatchlisted, true),
+          ),
+        );
+      const watchlistedIds = new Set(
+        watchlistedRows.map((r) =>
+          r.userAId === userId ? r.userBId : r.userAId,
+        ),
+      );
+      const visibleFriendIds = friendIds.filter(
+        (id) => !watchlistedIds.has(id),
+      );
+      if (visibleFriendIds.length === 0) return [];
+
+      const rows = await db
+        .select({ checkin: schema.checkins, owner: schema.users })
+        .from(schema.checkins)
+        .innerJoin(schema.users, eq(schema.checkins.userId, schema.users.id))
+        .where(inArray(schema.checkins.userId, visibleFriendIds))
+        .orderBy(desc(schema.checkins.createdAt));
+
+      const result: StoredFriendCheckin[] = rows.map(({ checkin, owner }) => ({
+        ...mapCheckin(checkin),
+        ownerDisplayName: owner.displayName,
+        ownerAvatarUrl: owner.avatarUrl,
+      }));
+      return result;
+    },
+
+    async listCheckinsForFriend(userId, friendId) {
+      const ok = await areFriends(userId, friendId);
+      if (!ok) return null;
+      const rows = await db
+        .select()
+        .from(schema.checkins)
+        .where(eq(schema.checkins.userId, friendId))
+        .orderBy(desc(schema.checkins.createdAt));
+      return rows.map(mapCheckin);
+    },
+
+    async getTally() {
+      const cutoff = new Date(
+        Date.now() - TALLY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+      );
+      const rows = await db
+        .select({
+          region: schema.connections.region,
+          type: schema.connections.type,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(schema.connections)
+        .where(gt(schema.connections.createdAt, cutoff))
+        .groupBy(schema.connections.region, schema.connections.type);
+
+      const byRegion = new Map<string, TallyRegionCount>();
+      for (const row of rows) {
+        const entry = byRegion.get(row.region) ?? {
+          region: row.region,
+          checkin: 0,
+          friendAdd: 0,
+          eventJoin: 0,
+        };
+        if (row.type === "checkin") entry.checkin = row.count;
+        else if (row.type === "friend_add") entry.friendAdd = row.count;
+        else if (row.type === "event_join") entry.eventJoin = row.count;
+        byRegion.set(row.region, entry);
+      }
+      return [...byRegion.values()].sort(
+        (a, b) =>
+          b.checkin +
+          b.friendAdd +
+          b.eventJoin -
+          (a.checkin + a.friendAdd + a.eventJoin),
+      );
     },
   };
 }

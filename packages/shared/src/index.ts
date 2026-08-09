@@ -145,11 +145,23 @@ export type CreateFriendRequestBody = z.infer<
 export const friendSummarySchema = peerSummarySchema;
 export type FriendSummary = z.infer<typeof friendSummarySchema>;
 
+export const friendListEntrySchema = peerSummarySchema.extend({
+  isWatchlisted: z.boolean(),
+});
+export type FriendListEntry = z.infer<typeof friendListEntrySchema>;
+
 export const friendsMeResponseSchema = z.object({
   friendCode: z.string(),
-  friends: z.array(friendSummarySchema),
+  friends: z.array(friendListEntrySchema),
 });
 export type FriendsMeResponse = z.infer<typeof friendsMeResponseSchema>;
+
+export const setFriendshipWatchlistBodySchema = z.object({
+  isWatchlisted: z.boolean(),
+});
+export type SetFriendshipWatchlistBody = z.infer<
+  typeof setFriendshipWatchlistBodySchema
+>;
 
 export const friendRequestSchema = z.object({
   id: z.string().uuid(),
@@ -256,6 +268,28 @@ export type UploadEventImageResponse = z.infer<
   typeof uploadEventImageResponseSchema
 >;
 
+// --- Post-event photos ---
+
+export const createEventPhotoBodySchema = z.object({
+  photoUrl: z.string().url(),
+});
+export type CreateEventPhotoBody = z.infer<typeof createEventPhotoBodySchema>;
+
+export const eventPhotoSchema = z.object({
+  id: z.string().uuid(),
+  eventId: z.string().uuid(),
+  photoUrl: z.string(),
+  createdAt: z.string().datetime(),
+});
+export type EventPhoto = z.infer<typeof eventPhotoSchema>;
+
+export const uploadEventPhotoResponseSchema = z.object({
+  url: z.string().url(),
+});
+export type UploadEventPhotoResponse = z.infer<
+  typeof uploadEventPhotoResponseSchema
+>;
+
 // --- Checkins / map ---
 
 export const CHECKIN_CAPTION_MAX = 140;
@@ -288,3 +322,41 @@ export const uploadCheckinPhotoResponseSchema = z.object({
 export type UploadCheckinPhotoResponse = z.infer<
   typeof uploadCheckinPhotoResponseSchema
 >;
+
+export const friendCheckinSchema = checkinSchema.extend({
+  ownerDisplayName: z.string(),
+  ownerAvatarUrl: z.string().nullable(),
+});
+export type FriendCheckin = z.infer<typeof friendCheckinSchema>;
+
+export const friendMapResponseSchema = z.object({
+  friend: peerSummarySchema,
+  checkins: z.array(checkinSchema),
+});
+export type FriendMapResponse = z.infer<typeof friendMapResponseSchema>;
+
+// --- Public tally (no auth) ---
+
+export const TALLY_WINDOW_DAYS = 7;
+export const TALLY_POLL_INTERVAL_MS = 8000;
+
+export const connectionTypeSchema = z.enum([
+  "checkin",
+  "friend_add",
+  "event_join",
+]);
+export type ConnectionType = z.infer<typeof connectionTypeSchema>;
+
+export const tallyRegionSchema = z.object({
+  region: z.string(),
+  checkin: z.number().int().nonnegative(),
+  friendAdd: z.number().int().nonnegative(),
+  eventJoin: z.number().int().nonnegative(),
+});
+export type TallyRegion = z.infer<typeof tallyRegionSchema>;
+
+export const tallyResponseSchema = z.object({
+  windowDays: z.literal(TALLY_WINDOW_DAYS),
+  regions: z.array(tallyRegionSchema),
+});
+export type TallyResponse = z.infer<typeof tallyResponseSchema>;
