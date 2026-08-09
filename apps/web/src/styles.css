@@ -87,7 +87,7 @@ html[data-theme="light"] {
     linear-gradient(160deg, var(--bg0), var(--bg1) 50%, #dfeaf7);
 }
 
- * Memories palette — off-white paper on a blue-tinted table, deep navy ink.
+/* Memories palette — off-white paper on a blue-tinted table, deep navy ink.
  * Light is the app default; the dark overrides below flip the paper to navy and
  * the ink to cream so the keepsakes still read as physical objects at night.
  */
@@ -134,6 +134,7 @@ html[data-theme="dark"] {
   --memory-dash: rgba(242, 236, 225, 0.3);
   --memory-receipt-paper: #1a2431;
   --memory-warn: #e8845c;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .ambient-orb,
