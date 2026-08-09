@@ -111,10 +111,3 @@ The live project is deployed at https://summerhacks-ebon.vercel.app. The longer 
 - Deploy  Vercel + Neon + Blob ([guide](docs/deploy-vercel.md))
 - Auth  Neon Auth setup ([guide](docs/auth-neon.md))
 
-## Team
-
-Built at SummerHacks 2026 by Justin, Gurehmat, Aleesha Abdullah, Justin Leski, and Gurehmat Chahal.
-
-## License
-
-MIT. <!-- TODO: verify repository license before publishing. -->
