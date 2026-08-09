@@ -14,6 +14,7 @@ import type {
   EventDetail,
   FriendRequest,
   FriendRequestStatus,
+  FriendListEntry,
   FriendSummary,
   MemoryListItem,
   MemoryPhoto,
@@ -298,7 +299,54 @@ export type CreateEventInput = {
 
 export type FriendsMeResult = {
   friendCode: string;
-  friends: FriendSummary[];
+  friends: FriendListEntry[];
+};
+
+export type CreateEventPhotoInput = {
+  eventId: string;
+  photoUrl: string;
+};
+
+export type StoredEventPhoto = {
+  id: string;
+  eventId: string;
+  photoUrl: string;
+  createdAt: Date;
+};
+
+export type CreateCheckinInput = {
+  userId: string;
+  lat: number;
+  lng: number;
+  /** Free-text, user-authored — stored on the checkin itself for map/popup display. */
+  region: string;
+  /** IP-derived (geoFromRequest), used only for the connections tally row. */
+  connectionRegion: string;
+  photoUrl: string | null;
+  caption: string | null;
+};
+
+export type StoredCheckin = {
+  id: string;
+  userId: string;
+  lat: number;
+  lng: number;
+  region: string | null;
+  photoUrl: string | null;
+  caption: string | null;
+  createdAt: Date;
+};
+
+export type StoredFriendCheckin = StoredCheckin & {
+  ownerDisplayName: string;
+  ownerAvatarUrl: string | null;
+};
+
+export type TallyRegionCount = {
+  region: string;
+  checkin: number;
+  friendAdd: number;
+  eventJoin: number;
 };
 
 export type InboxFriendRequest = FriendRequest & {
@@ -450,12 +498,18 @@ export interface Store {
   acceptFriendRequest(
     userId: string,
     requestId: string,
+    region: string,
   ): Promise<StoredFriendRequest>;
   rejectFriendRequest(
     userId: string,
     requestId: string,
   ): Promise<StoredFriendRequest>;
   unfriend(userId: string, otherUserId: string): Promise<boolean>;
+  setFriendshipWatchlist(
+    userId: string,
+    friendId: string,
+    isWatchlisted: boolean,
+  ): Promise<boolean>;
 
   createEvent(input: CreateEventInput): Promise<CalendarEvent>;
   listCalendar(userId: string): Promise<CalendarEvent[]>;
@@ -464,18 +518,34 @@ export interface Store {
     userId: string,
     eventId: string,
     status: RsvpStatus,
+    region: string,
   ): Promise<EventDetail | null>;
   addEventComment(
     userId: string,
     eventId: string,
     body: string,
   ): Promise<EventComment>;
+  addEventPhoto(input: CreateEventPhotoInput): Promise<StoredEventPhoto>;
+  listEventPhotos(eventId: string): Promise<StoredEventPhoto[]>;
   listActivity(userId: string): Promise<ActivityNotification[]>;
   markActivityRead(
     userId: string,
     notificationId: string,
   ): Promise<ActivityNotification | null>;
   markAllActivityRead(userId: string): Promise<number>;
+
+  // Checkins
+  createCheckin(input: CreateCheckinInput): Promise<StoredCheckin>;
+  listCheckinsForUser(userId: string): Promise<StoredCheckin[]>;
+  /** Friends' check-ins, excluding pairs where friendships.is_watchlisted = true. */
+  listFriendCheckins(userId: string): Promise<StoredFriendCheckin[]>;
+  /** A single friend's check-ins; null if the two users aren't friends. */
+  listCheckinsForFriend(
+    userId: string,
+    friendId: string,
+  ): Promise<StoredCheckin[] | null>;
+  /** Public aggregate — per-region connection counts, last TALLY_WINDOW_DAYS days. */
+  getTally(): Promise<TallyRegionCount[]>;
 
   // Memories
   /** Called from `tryMatchBump` the moment a bump session is created. */

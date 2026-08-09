@@ -8,6 +8,7 @@ import {
   gt,
   inArray,
   isNotNull,
+  isNull,
   lt,
   ne,
   or,
@@ -18,6 +19,7 @@ import {
   BUMP_CANDIDATE_WINDOW_MS,
   MATCH_TIME_WINDOW_MS,
   MEMORY_SONGS_PER_USER,
+  TALLY_WINDOW_DAYS,
   emptyPixelGrid,
   isValidMemoryPhotoCount,
   type ActivityNotification,
@@ -26,6 +28,7 @@ import {
   type CalendarEvent,
   type EventComment,
   type EventDetail,
+  type FriendListEntry,
   type FriendSummary,
   type MemoryMember,
   type MemoryPhoto,
@@ -46,6 +49,12 @@ import type {
   StoredAlbum,
   StoredBumpIntent,
   StoredBumpProposal,
+  TallyRegionCount,
+  StoredFriendCheckin,
+  StoredEventPhoto,
+  StoredCheckin,
+  CreateEventPhotoInput,
+  CreateCheckinInput,
   StoredFriendRequest,
   StoredMemory,
   StoredSpotifyConnection,
@@ -257,12 +266,37 @@ function storeError(message: string, status: number): Error {
   return err;
 }
 
+
+function mapCheckin(row: typeof schema.checkins.$inferSelect): StoredCheckin {
+  return {
+    id: row.id,
+    userId: row.userId,
+    lat: row.lat,
+    lng: row.lng,
+    region: row.region,
+    photoUrl: row.photoUrl,
+    caption: row.caption,
+    createdAt: row.createdAt,
+  };
+}
+
+function mapEventPhoto(
+  row: typeof schema.eventPhotos.$inferSelect,
+): StoredEventPhoto {
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    photoUrl: row.photoUrl,
+    createdAt: row.createdAt,
+  };
+}
+
 export function createNeonStore(databaseUrl: string): Store {
   const sqlClient = neon(databaseUrl);
   const db = drizzle(sqlClient, { schema });
 
   async function allocateFriendCode(): Promise<string> {
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 32; i++) {
       const code = generateFriendCode();
       const [existing] = await db
         .select({ id: schema.users.id })
@@ -274,17 +308,39 @@ export function createNeonStore(databaseUrl: string): Store {
     throw new Error("Failed to allocate friend code");
   }
 
+  /**
+   * Assign a friend code exactly once. Concurrent callers for the same user
+   * converge on one code; unique index prevents cross-user collisions.
+   */
   async function ensureFriendCode(
     row: typeof schema.users.$inferSelect,
   ): Promise<StoredUser> {
     if (row.friendCode) return mapUser(row);
-    const code = await allocateFriendCode();
-    const [updated] = await db
-      .update(schema.users)
-      .set({ friendCode: code })
-      .where(eq(schema.users.id, row.id))
-      .returning();
-    return mapUser(updated);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const code = await allocateFriendCode();
+      try {
+        const [updated] = await db
+          .update(schema.users)
+          .set({ friendCode: code })
+          .where(
+            and(eq(schema.users.id, row.id), isNull(schema.users.friendCode)),
+          )
+          .returning();
+        if (updated) return mapUser(updated);
+        // Another request already set a code — reload.
+        const [fresh] = await db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.id, row.id))
+          .limit(1);
+        if (fresh?.friendCode) return mapUser(fresh);
+      } catch (err) {
+        // Unique violation on friend_code — retry with a new code.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/unique|duplicate/i.test(msg)) throw err;
+      }
+    }
+    throw new Error("Failed to ensure friend code");
   }
 
   async function expireIfNeeded(
@@ -853,11 +909,23 @@ export function createNeonStore(databaseUrl: string): Store {
         }
       }
       const friendCode = await allocateFriendCode();
-      const [row] = await db
-        .insert(schema.users)
-        .values({ displayName, deviceId: deviceId ?? null, friendCode })
-        .returning();
-      return mapUser(row);
+      try {
+        const [row] = await db
+          .insert(schema.users)
+          .values({ displayName, deviceId: deviceId ?? null, friendCode })
+          .returning();
+        return mapUser(row);
+      } catch (err) {
+        // Unique friend_code race — allocate again once.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/unique|duplicate/i.test(msg)) throw err;
+        const retryCode = await allocateFriendCode();
+        const [row] = await db
+          .insert(schema.users)
+          .values({ displayName, deviceId: deviceId ?? null, friendCode: retryCode })
+          .returning();
+        return mapUser(row);
+      }
     },
 
     async upsertFromAuth(input) {
@@ -881,18 +949,36 @@ export function createNeonStore(databaseUrl: string): Store {
         return mapUser({ ...updated, friendCode: withCode.friendCode });
       }
       const friendCode = await allocateFriendCode();
-      const [row] = await db
-        .insert(schema.users)
-        .values({
-          displayName: input.displayName,
-          avatarUrl: input.avatarUrl ?? null,
-          email: input.email ?? null,
-          authUserId: input.authUserId,
-          deviceId: null,
-          friendCode,
-        })
-        .returning();
-      return mapUser(row);
+      try {
+        const [row] = await db
+          .insert(schema.users)
+          .values({
+            displayName: input.displayName,
+            avatarUrl: input.avatarUrl ?? null,
+            email: input.email ?? null,
+            authUserId: input.authUserId,
+            deviceId: null,
+            friendCode,
+          })
+          .returning();
+        return mapUser(row);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/unique|duplicate/i.test(msg)) throw err;
+        const retryCode = await allocateFriendCode();
+        const [row] = await db
+          .insert(schema.users)
+          .values({
+            displayName: input.displayName,
+            avatarUrl: input.avatarUrl ?? null,
+            email: input.email ?? null,
+            authUserId: input.authUserId,
+            deviceId: null,
+            friendCode: retryCode,
+          })
+          .returning();
+        return mapUser(row);
+      }
     },
 
     async getUser(id) {
@@ -1508,7 +1594,23 @@ export function createNeonStore(databaseUrl: string): Store {
       const me = await this.getUser(userId);
       if (!me) throw storeError("User not found", 404);
       const friendIds = await listFriendIds(userId);
-      const friends: FriendSummary[] = [];
+      const watchlistByFriendId = new Map<string, boolean>();
+      if (friendIds.length > 0) {
+        const rows = await db
+          .select()
+          .from(schema.friendships)
+          .where(
+            or(
+              eq(schema.friendships.userAId, userId),
+              eq(schema.friendships.userBId, userId),
+            ),
+          );
+        for (const row of rows) {
+          const otherId = row.userAId === userId ? row.userBId : row.userAId;
+          watchlistByFriendId.set(otherId, row.isWatchlisted);
+        }
+      }
+      const friends: FriendListEntry[] = [];
       for (const fid of friendIds) {
         const u = await this.getUser(fid);
         if (u) {
@@ -1516,6 +1618,7 @@ export function createNeonStore(databaseUrl: string): Store {
             id: u.id,
             displayName: u.displayName,
             avatarUrl: u.avatarUrl,
+            isWatchlisted: watchlistByFriendId.get(fid) ?? false,
           });
         }
       }
@@ -1606,7 +1709,7 @@ export function createNeonStore(databaseUrl: string): Store {
       }));
     },
 
-    async acceptFriendRequest(userId, requestId) {
+    async acceptFriendRequest(userId, requestId, region) {
       const [req] = await db
         .select()
         .from(schema.friendRequests)
@@ -1630,6 +1733,11 @@ export function createNeonStore(databaseUrl: string): Store {
         .insert(schema.friendships)
         .values({ userAId: pair.userAId, userBId: pair.userBId })
         .onConflictDoNothing();
+
+      await db.insert(schema.connections).values({
+        type: "friend_add",
+        region,
+      });
 
       return mapFriendRequest(updated);
     },
@@ -1666,6 +1774,21 @@ export function createNeonStore(databaseUrl: string): Store {
         )
         .returning();
       return deleted.length > 0;
+    },
+
+    async setFriendshipWatchlist(userId, friendId, isWatchlisted) {
+      const pair = orderedFriendshipPair(userId, friendId);
+      const updated = await db
+        .update(schema.friendships)
+        .set({ isWatchlisted })
+        .where(
+          and(
+            eq(schema.friendships.userAId, pair.userAId),
+            eq(schema.friendships.userBId, pair.userBId),
+          ),
+        )
+        .returning();
+      return updated.length > 0;
     },
 
     async createEvent(input: CreateEventInput) {
@@ -1799,7 +1922,7 @@ export function createNeonStore(databaseUrl: string): Store {
       return loadEventDetail(userId, eventId);
     },
 
-    async rsvpEvent(userId, eventId, status) {
+    async rsvpEvent(userId, eventId, status, region) {
       const [event] = await db
         .select()
         .from(schema.events)
@@ -1894,7 +2017,25 @@ export function createNeonStore(databaseUrl: string): Store {
       return result;
     },
 
-    async listActivity(userId) {
+    
+    async addEventPhoto(input: CreateEventPhotoInput) {
+      const [row] = await db
+        .insert(schema.eventPhotos)
+        .values({ eventId: input.eventId, photoUrl: input.photoUrl })
+        .returning();
+      return mapEventPhoto(row);
+    },
+
+    async listEventPhotos(eventId) {
+      const rows = await db
+        .select()
+        .from(schema.eventPhotos)
+        .where(eq(schema.eventPhotos.eventId, eventId))
+        .orderBy(desc(schema.eventPhotos.createdAt));
+      return rows.map(mapEventPhoto);
+    },
+
+async listActivity(userId) {
       const rows = await db
         .select({
           notification: schema.activityNotifications,
@@ -1975,7 +2116,131 @@ export function createNeonStore(databaseUrl: string): Store {
       return updated.length;
     },
 
-    async createMemoryForSession(sessionId, memberUserIds, sessionCreatedAt) {
+    
+    async createCheckin(input: CreateCheckinInput) {
+      const now = new Date();
+      const [row] = await db
+        .insert(schema.checkins)
+        .values({
+          userId: input.userId,
+          lat: input.lat,
+          lng: input.lng,
+          region: input.region,
+          photoUrl: input.photoUrl,
+          caption: input.caption,
+          createdAt: now,
+        })
+        .returning();
+
+      await db.insert(schema.connections).values({
+        type: "checkin",
+        region: input.connectionRegion,
+        createdAt: now,
+      });
+
+      return mapCheckin(row);
+    },
+
+    async listCheckinsForUser(userId) {
+      const rows = await db
+        .select()
+        .from(schema.checkins)
+        .where(eq(schema.checkins.userId, userId))
+        .orderBy(desc(schema.checkins.createdAt));
+      return rows.map(mapCheckin);
+    },
+
+    async listFriendCheckins(userId) {
+      const friendIds = await listFriendIds(userId);
+      if (friendIds.length === 0) return [];
+
+      const watchlistedRows = await db
+        .select({
+          userAId: schema.friendships.userAId,
+          userBId: schema.friendships.userBId,
+        })
+        .from(schema.friendships)
+        .where(
+          and(
+            or(
+              eq(schema.friendships.userAId, userId),
+              eq(schema.friendships.userBId, userId),
+            ),
+            eq(schema.friendships.isWatchlisted, true),
+          ),
+        );
+      const watchlistedIds = new Set(
+        watchlistedRows.map((r) =>
+          r.userAId === userId ? r.userBId : r.userAId,
+        ),
+      );
+      const visibleFriendIds = friendIds.filter(
+        (id) => !watchlistedIds.has(id),
+      );
+      if (visibleFriendIds.length === 0) return [];
+
+      const rows = await db
+        .select({ checkin: schema.checkins, owner: schema.users })
+        .from(schema.checkins)
+        .innerJoin(schema.users, eq(schema.checkins.userId, schema.users.id))
+        .where(inArray(schema.checkins.userId, visibleFriendIds))
+        .orderBy(desc(schema.checkins.createdAt));
+
+      return rows.map(({ checkin, owner }) => ({
+        ...mapCheckin(checkin),
+        ownerDisplayName: owner.displayName,
+        ownerAvatarUrl: owner.avatarUrl,
+      }));
+    },
+
+    async listCheckinsForFriend(userId, friendId) {
+      const ok = await areFriends(userId, friendId);
+      if (!ok) return null;
+      const rows = await db
+        .select()
+        .from(schema.checkins)
+        .where(eq(schema.checkins.userId, friendId))
+        .orderBy(desc(schema.checkins.createdAt));
+      return rows.map(mapCheckin);
+    },
+
+    async getTally() {
+      const cutoff = new Date(
+        Date.now() - TALLY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+      );
+      const rows = await db
+        .select({
+          region: schema.connections.region,
+          type: schema.connections.type,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(schema.connections)
+        .where(gt(schema.connections.createdAt, cutoff))
+        .groupBy(schema.connections.region, schema.connections.type);
+
+      const byRegion = new Map<string, TallyRegionCount>();
+      for (const row of rows) {
+        const entry = byRegion.get(row.region) ?? {
+          region: row.region,
+          checkin: 0,
+          friendAdd: 0,
+          eventJoin: 0,
+        };
+        if (row.type === "checkin") entry.checkin = row.count;
+        else if (row.type === "friend_add") entry.friendAdd = row.count;
+        else if (row.type === "event_join") entry.eventJoin = row.count;
+        byRegion.set(row.region, entry);
+      }
+      return [...byRegion.values()].sort(
+        (a, b) =>
+          b.checkin +
+          b.friendAdd +
+          b.eventJoin -
+          (a.checkin + a.friendAdd + a.eventJoin),
+      );
+    },
+
+async createMemoryForSession(sessionId, memberUserIds, sessionCreatedAt) {
       return seedMemory(sessionId, memberUserIds, sessionCreatedAt);
     },
 

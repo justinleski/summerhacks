@@ -5,12 +5,14 @@ import { ZodError } from "zod";
 import { activityRoutes } from "./routes/activity.js";
 import { bumpsRoutes } from "./routes/bumps.js";
 import { calendarRoutes } from "./routes/calendar.js";
+import { checkinsRoutes } from "./routes/checkins.js";
 import { eventsRoutes } from "./routes/events.js";
 import { friendsRoutes } from "./routes/friends.js";
 import { internalRoutes } from "./routes/internal.js";
 import { memoriesRoutes } from "./routes/memories.js";
 import { sessionsRoutes } from "./routes/sessions.js";
 import { spotifyRoutes } from "./routes/spotify.js";
+import { tallyRoutes } from "./routes/tally.js";
 import { uploadsRoutes } from "./routes/uploads.js";
 import { usersRoutes } from "./routes/users.js";
 
@@ -32,6 +34,9 @@ app.get("/health", (c) =>
   }),
 );
 
+// Public — no requireAuth, mounted here alongside /health before any auth-guarded routes.
+app.route("/tally", tallyRoutes);
+
 app.route("/users", usersRoutes);
 app.route("/bumps", bumpsRoutes);
 app.route("/sessions", sessionsRoutes);
@@ -43,6 +48,7 @@ app.route("/uploads", uploadsRoutes);
 app.route("/memories", memoriesRoutes);
 app.route("/spotify", spotifyRoutes);
 app.route("/internal", internalRoutes);
+app.route("/checkins", checkinsRoutes);
 
 app.onError((err, c) => {
   if (err instanceof ZodError) {

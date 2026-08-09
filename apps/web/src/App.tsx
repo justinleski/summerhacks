@@ -1,7 +1,10 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { CalendarPage } from "./features/calendar/CalendarPage";
 import { EventDetailPage } from "./features/calendar/EventDetailPage";
+import { ExplorePage } from "./features/explore/ExplorePage";
+import { FriendMapPage } from "./features/friends/FriendMapPage";
 import { FriendsPage } from "./features/friends/FriendsPage";
+import { MapPage } from "./features/map/MapPage";
 import { MemoriesListPage } from "./features/memories/MemoriesListPage";
 import { MemoryBuildPage } from "./features/memories/MemoryBuildPage";
 import { MemoryDetailPage } from "./features/memories/MemoryDetailPage";
@@ -14,9 +17,12 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/explore" element={<ExplorePage />} />
         <Route path="/friends" element={<FriendsPage />} />
+        <Route path="/friends/:friendId/map" element={<FriendMapPage />} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/events/:id" element={<EventDetailPage />} />
+        <Route path="/map" element={<MapPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/session/:id" element={<SessionView />} />
         <Route path="/memories" element={<MemoriesListPage />} />

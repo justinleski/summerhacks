@@ -11,7 +11,19 @@ Friendship also means **calendar follow**: friends are subscribed to each other'
 3. You see them in inbox → Accept
 4. Both appear on each other's friend list; future publishes fan out to both calendars
 
+## Watchlist and the friend map
+
+Each friendship can be **watchlisted** — a toggle on the friends list that mutes that friend's
+check-ins from your shared `/map` feed. It's not unfriending: you're still friends, their events
+still fan out to your calendar, you just don't want their pins cluttering the main map.
+
+To still view a watchlisted (or any) friend's check-ins specifically, use their **Map** link on
+`/friends` → `/friends/:friendId/map`. This is a narrow, check-ins-only view, not a general
+profile page — public profile pages remain a non-goal for this feature; this route is a scoped
+exception to that, gated server-side on an accepted friendship.
+
 ## Related
 
 - [API](api.md) · [Data model](data-model.md)
 - Calendar fan-out: [docs/calendar/overview.md](../calendar/overview.md)
+- Check-ins / map: [.context/features/friends/BRIEFING.md](../../.context/features/friends/BRIEFING.md)

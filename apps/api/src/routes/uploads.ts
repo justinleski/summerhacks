@@ -1,4 +1,4 @@
-import { put } from "@vercel/blob";
+import { BlobError, put } from "@vercel/blob";
 import { Hono } from "hono";
 import { requireAuth, type AuthVariables } from "../middleware/auth.js";
 
@@ -23,7 +23,7 @@ async function uploadImage(
     json: (body: unknown, status?: number) => Response;
     get: (key: "userId") => string;
   },
-  folder: "events" | "avatars" | "album-covers",
+  folder: "events" | "avatars" | "album-covers" | "checkins" | "event-photos",
   missingTokenMessage: string,
 ) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
@@ -47,12 +47,22 @@ async function uploadImage(
   }
 
   const pathname = `${folder}/${c.get("userId")}/${Date.now()}.${extForType(file.type)}`;
-  const blob = await put(pathname, file, {
-    access: "public",
-    token,
-    contentType: file.type,
-  });
-  return c.json({ url: blob.url }, 201);
+  try {
+    const blob = await put(pathname, file, {
+      access: "public",
+      token,
+      contentType: file.type,
+    });
+    return c.json({ url: blob.url }, 201);
+  } catch (err) {
+    if (err instanceof BlobError) {
+      const hint = err.message.includes("private store")
+        ? " Switch the store to Public access in the Vercel dashboard (Storage → your Blob store → Settings)."
+        : "";
+      return c.json({ error: `${err.message}${hint}` }, 502);
+    }
+    throw err;
+  }
 }
 
 export const uploadsRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -80,5 +90,21 @@ uploadsRoutes.post("/album-cover", async (c) =>
     c,
     "album-covers",
     "Album cover uploads are not configured (BLOB_READ_WRITE_TOKEN unset).",
+  ),
+);
+
+uploadsRoutes.post("/checkin-photo", async (c) =>
+  uploadImage(
+    c,
+    "checkins",
+    "Image uploads are not configured (BLOB_READ_WRITE_TOKEN unset). Check in without a photo, or set the token.",
+  ),
+);
+
+uploadsRoutes.post("/event-photo", async (c) =>
+  uploadImage(
+    c,
+    "event-photos",
+    "Image uploads are not configured (BLOB_READ_WRITE_TOKEN unset). Set the token to add event photos.",
   ),
 );

@@ -3,6 +3,7 @@ import {
   BUMP_CANDIDATE_WINDOW_MS,
   MATCH_TIME_WINDOW_MS,
   MEMORY_SONGS_PER_USER,
+  TALLY_WINDOW_DAYS,
   emptyPixelGrid,
   isValidMemoryPhotoCount,
   type ActivityNotification,
@@ -11,6 +12,7 @@ import {
   type CalendarEvent,
   type EventComment,
   type EventDetail,
+  type FriendListEntry,
   type FriendSummary,
   type MemoryMember,
   type MemoryPhoto,
@@ -32,6 +34,12 @@ import type {
   StoredAlbumVote,
   StoredBumpIntent,
   StoredBumpProposal,
+  TallyRegionCount,
+  CreateEventPhotoInput,
+  CreateCheckinInput,
+  StoredFriendCheckin,
+  StoredEventPhoto,
+  StoredCheckin,
   StoredFriendRequest,
   StoredMemory,
   StoredSession,
@@ -206,7 +214,16 @@ export function createMemoryStore(): Store {
   const albumContests = new Map<string, StoredAlbumContest>();
   const albumVotes = new Map<string, StoredAlbumVote>();
   const friendRequests = new Map<string, StoredFriendRequest>();
-  const friendships = new Set<string>();
+  const friendships = new Map<string, { isWatchlisted: boolean }>();
+  const checkins = new Map<string, StoredCheckin>();
+  type StoredConnection = {
+    id: string;
+    type: string;
+    region: string;
+    createdAt: Date;
+  };
+  const connections = new Map<string, StoredConnection>();
+  const eventPhotos = new Map<string, StoredEventPhoto>();
   const events = new Map<string, StoredEvent>();
   const attendees = new Map<string, StoredAttendee>(); // `${eventId}:${userId}`
   const comments = new Map<string, StoredComment>();
@@ -221,7 +238,7 @@ export function createMemoryStore(): Store {
   const spotifyConnections = new Map<string, StoredSpotifyConnection>();
 
   function allocFriendCode(): string {
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 32; i++) {
       const code = generateFriendCode();
       if (!usersByFriendCode.has(code)) return code;
     }
@@ -229,9 +246,10 @@ export function createMemoryStore(): Store {
   }
 
   function ensureFriendCode(user: StoredUser): StoredUser {
-    if (user.friendCode) return user;
+    const current = users.get(user.id) ?? user;
+    if (current.friendCode) return current;
     const code = allocFriendCode();
-    const updated = { ...user, friendCode: code };
+    const updated = { ...current, friendCode: code };
     users.set(updated.id, updated);
     usersByFriendCode.set(code, updated.id);
     return updated;
@@ -248,7 +266,7 @@ export function createMemoryStore(): Store {
 
   function friendIdsOf(userId: string): string[] {
     const ids: string[] = [];
-    for (const key of friendships) {
+    for (const key of friendships.keys()) {
       const [a, b] = key.split(":");
       if (a === userId) ids.push(b!);
       else if (b === userId) ids.push(a!);
@@ -1175,11 +1193,15 @@ export function createMemoryStore(): Store {
       const friends = friendIdsOf(userId)
         .map((id) => users.get(id))
         .filter((u): u is StoredUser => Boolean(u))
-        .map(toFriendSummary)
+        .map((u) => ({
+          ...toFriendSummary(u),
+          isWatchlisted:
+            friendships.get(friendshipKey(userId, u.id))?.isWatchlisted ??
+            false,
+        }))
         .sort((a, b) => a.displayName.localeCompare(b.displayName));
       return { friendCode: me.friendCode, friends };
     },
-
     async createFriendRequest(fromUserId, code) {
       const normalized = normalizeFriendCode(code);
       const toId = usersByFriendCode.get(normalized);
@@ -1244,7 +1266,7 @@ export function createMemoryStore(): Store {
       );
     },
 
-    async acceptFriendRequest(userId, requestId) {
+    async acceptFriendRequest(userId, requestId, region) {
       const req = friendRequests.get(requestId);
       if (!req || req.toUserId !== userId) {
         const err = new Error("Friend request not found");
@@ -1262,10 +1284,19 @@ export function createMemoryStore(): Store {
         updatedAt: new Date(),
       };
       friendRequests.set(requestId, updated);
-      friendships.add(friendshipKey(req.fromUserId, req.toUserId));
+      friendships.set(friendshipKey(req.fromUserId, req.toUserId), {
+        isWatchlisted: false,
+      });
+
+      const connection: StoredConnection = {
+        id: randomUUID(),
+        type: "friend_add",
+        region,
+        createdAt: new Date(),
+      };
+      connections.set(connection.id, connection);
       return updated;
     },
-
     async rejectFriendRequest(userId, requestId) {
       const req = friendRequests.get(requestId);
       if (!req || req.toUserId !== userId) {
@@ -1294,6 +1325,12 @@ export function createMemoryStore(): Store {
       return true;
     },
 
+    async setFriendshipWatchlist(userId, friendId, isWatchlisted) {
+      const key = friendshipKey(userId, friendId);
+      if (!friendships.has(key)) return false;
+      friendships.set(key, { isWatchlisted });
+      return true;
+    },
     async createEvent(input: CreateEventInput) {
       const now = new Date();
       const event: StoredEvent = {
@@ -1347,7 +1384,7 @@ export function createMemoryStore(): Store {
       return eventDetail(userId, event);
     },
 
-    async rsvpEvent(userId, eventId, status) {
+    async rsvpEvent(userId, eventId, status, region) {
       const event = events.get(eventId);
       if (!event || !canSeeEvent(userId, event)) return null;
 
@@ -1377,11 +1414,18 @@ export function createMemoryStore(): Store {
             via: "foaf_attendance",
           });
         }
+
+        const connection: StoredConnection = {
+          id: randomUUID(),
+          type: "event_join",
+          region,
+          createdAt: now,
+        };
+        connections.set(connection.id, connection);
       }
 
       return eventDetail(userId, event);
     },
-
     async addEventComment(userId, eventId, body) {
       const event = events.get(eventId);
       if (!event || !canSeeEvent(userId, event)) {
@@ -1464,6 +1508,106 @@ export function createMemoryStore(): Store {
         count++;
       }
       return count;
+    },
+
+    async addEventPhoto(input: CreateEventPhotoInput) {
+      const photo: StoredEventPhoto = {
+        id: randomUUID(),
+        eventId: input.eventId,
+        photoUrl: input.photoUrl,
+        createdAt: new Date(),
+      };
+      eventPhotos.set(photo.id, photo);
+      return photo;
+    },
+
+    async listEventPhotos(eventId) {
+      return [...eventPhotos.values()]
+        .filter((p) => p.eventId === eventId)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    },
+
+    async createCheckin(input: CreateCheckinInput) {
+      const now = new Date();
+      const checkin: StoredCheckin = {
+        id: randomUUID(),
+        userId: input.userId,
+        lat: input.lat,
+        lng: input.lng,
+        region: input.region,
+        photoUrl: input.photoUrl,
+        caption: input.caption,
+        createdAt: now,
+      };
+      checkins.set(checkin.id, checkin);
+
+      const connection: StoredConnection = {
+        id: randomUUID(),
+        type: "checkin",
+        region: input.connectionRegion,
+        createdAt: now,
+      };
+      connections.set(connection.id, connection);
+
+      return checkin;
+    },
+
+    async listCheckinsForUser(userId) {
+      return [...checkins.values()]
+        .filter((c) => c.userId === userId)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    },
+
+    async listFriendCheckins(userId) {
+      const visibleFriendIds = friendIdsOf(userId).filter(
+        (fid) => !friendships.get(friendshipKey(userId, fid))?.isWatchlisted,
+      );
+      if (visibleFriendIds.length === 0) return [];
+      const visible = new Set(visibleFriendIds);
+      const rows: StoredFriendCheckin[] = [...checkins.values()]
+        .filter((c) => visible.has(c.userId))
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .map((c) => {
+          const owner = users.get(c.userId);
+          return {
+            ...c,
+            ownerDisplayName: owner?.displayName ?? "Unknown",
+            ownerAvatarUrl: owner?.avatarUrl ?? null,
+          };
+        });
+      return rows;
+    },
+
+    async listCheckinsForFriend(userId, friendId) {
+      if (!areFriends(userId, friendId)) return null;
+      return [...checkins.values()]
+        .filter((c) => c.userId === friendId)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    },
+
+    async getTally() {
+      const cutoff = Date.now() - TALLY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+      const byRegion = new Map<string, TallyRegionCount>();
+      for (const c of connections.values()) {
+        if (c.createdAt.getTime() < cutoff) continue;
+        const entry = byRegion.get(c.region) ?? {
+          region: c.region,
+          checkin: 0,
+          friendAdd: 0,
+          eventJoin: 0,
+        };
+        if (c.type === "checkin") entry.checkin++;
+        else if (c.type === "friend_add") entry.friendAdd++;
+        else if (c.type === "event_join") entry.eventJoin++;
+        byRegion.set(c.region, entry);
+      }
+      return [...byRegion.values()].sort(
+        (a, b) =>
+          b.checkin +
+          b.friendAdd +
+          b.eventJoin -
+          (a.checkin + a.friendAdd + a.eventJoin),
+      );
     },
 
     async createMemoryForSession(sessionId, memberUserIds, sessionCreatedAt) {

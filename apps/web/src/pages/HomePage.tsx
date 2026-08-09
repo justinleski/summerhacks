@@ -359,6 +359,9 @@ export function HomePage() {
           </button>
         </div>
         {error && <p className="error">{error}</p>}
+        <Link className="text-link" to="/explore">
+          Or view public activity, no login needed →
+        </Link>
         <Toast message={toast} onDone={clearToast} />
       </main>
     );
@@ -385,6 +388,8 @@ export function HomePage() {
         <Link to="/friends">Friends</Link>
         <Link to="/calendar">Calendar</Link>
         <Link to="/memories">Memories</Link>
+        <Link to="/map">Map</Link>
+        <Link to="/explore">Explore</Link>
         <Link to="/profile">Profile</Link>
       </nav>
 

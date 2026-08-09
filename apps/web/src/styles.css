@@ -1408,3 +1408,278 @@ html[data-theme="light"] .memory-cta {
   border-color: rgba(20, 32, 22, 0.14);
 }
 
+/* --- aa_dev: friends map / checkins / explore / tally --- */
+.watchlist-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.watchlist-toggle input {
+  padding: 0;
+}
+
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+  max-width: 22rem;
+}
+
+.month-day {
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+  border-radius: 0.4rem;
+}
+
+.month-day--hot {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.event-link {
+  display: grid;
+  gap: 0.2rem;
+  text-decoration: none;
+  color: inherit;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(243, 240, 230, 0.12);
+}
+
+.event-link__title {
+  font-weight: 600;
+}
+
+.event-link__meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.event-image {
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  border-radius: 0.75rem;
+  margin: 1rem 0;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.photo-grid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+}
+
+.tally-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.tally-card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 0.9rem;
+  padding: 1.25rem;
+}
+
+.tally-card h2 {
+  margin: 0 0 0.85rem;
+  font-size: 1.1rem;
+}
+
+.tally-stats {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.tally-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.tally-stat__number {
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.tally-stat__label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 0.3rem;
+}
+
+.profile-avatar-block {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.avatar-lg {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border);
+}
+
+.avatar-lg--empty {
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  font-family: var(--font-display);
+  font-size: 2rem;
+}
+
+.file-label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.file-label input[type="file"] {
+  font-size: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .inline-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+.map-page {
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.map-container {
+  position: absolute;
+  inset: 0;
+}
+
+.map-page__header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 500;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 1.5rem min(1.5rem, 4vw) 1rem;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--bg0) 88%, transparent),
+    transparent
+  );
+  pointer-events: none;
+}
+
+.map-page__header > * {
+  pointer-events: auto;
+}
+
+.map-page__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.map-page__header-actions .text-link {
+  margin: 0;
+}
+
+.map-page__error {
+  position: absolute;
+  top: 6rem;
+  left: min(1.5rem, 4vw);
+  z-index: 500;
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.85rem;
+}
+
+.map-page__loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+}
+
+.map-page__empty {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 500;
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.checkin-pin {
+  background: transparent;
+  border: none;
+}
+
+.checkin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 16, 12, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+
+.checkin-modal {
+  width: min(28rem, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1.5rem;
+}
+
+.checkin-modal h2 {
+  margin-top: 0;
+}
+
+.checkin-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
