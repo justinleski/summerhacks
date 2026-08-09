@@ -12,6 +12,8 @@ Postgres on Neon (or in-memory mirror of the same shapes). Relations are first-c
 | display_name | text | |
 | avatar_url | text nullable | |
 | device_id | text nullable unique | Lightweight resume key (`localStorage`) |
+| auth_user_id | text nullable unique | Neon Auth `neon_auth.user.id` when OAuth/signed in |
+| email | text nullable | From Neon Auth claims |
 | created_at | timestamptz | |
 
 ### `bump_intents` (ephemeral)

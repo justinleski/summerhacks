@@ -2,7 +2,12 @@
 
 Hono app uses `basePath("/api")`. On Vercel and via the Vite proxy, the browser calls **same-origin** `/api/...`.
 
-Auth: `Authorization: Bearer <token>` (or `X-User-Token`). MVP **token = user id** from bootstrap. All bump and session routes require auth except health and bootstrap.
+## Auth
+
+- Guest / MVP: `Authorization: Bearer <userId>` from `POST /api/users/bootstrap`
+- Neon Auth: `Authorization: Bearer <jwt>` (EdDSA, short-lived). API verifies via JWKS at `{NEON_AUTH_BASE_URL}/.well-known/jwks.json` and upserts `users` by `auth_user_id`. See [auth-neon.md](../auth-neon.md).
+
+All authenticated routes expect `Authorization: Bearer <token>` (or `x-user-token`).
 
 ## Health
 

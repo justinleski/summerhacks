@@ -9,10 +9,12 @@ Browser
   │
   ├─ GET /                    → static files from apps/web/dist
   ├─ GET /session/:id         → SPA fallback (index.html) → React Router
+  ├─ GET /friends|/calendar|/profile|/events/:id → SPA
   │
   └─ /api/*                   → rewrite → api/index.ts (Hono)
                                   └─ apps/api/src/app.ts (basePath /api)
                                        └─ Neon Postgres (DATABASE_URL)
+                                       └─ Vercel Blob (BLOB_READ_WRITE_TOKEN, optional)
 ```
 
 | Concern | Where | Notes |
@@ -94,6 +96,29 @@ npx vercel env add DATABASE_URL production   # if using Production
 6. Redeploy: `npm run deploy` or `npm run deploy:prod`
 7. Verify: `GET /api/health` → `"store":"neon"`
 
+### Schema push after Friends / Calendar / Profile
+
+New tables/columns (`friend_code`, `bio`, friendships, events, activity, …) require another `db:push` against Neon before Preview uses them:
+
+```bash
+set -a && source .env && set +a
+npm run db:push -w @summerhacks/api
+# or: DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:push -w @summerhacks/api
+```
+
+### Vercel Blob (event images + profile avatars)
+
+1. Vercel dashboard → Storage → Blob → create store (or use existing)
+2. Copy the **read-write** token into local `.env` as `BLOB_READ_WRITE_TOKEN`
+3. Add to Vercel envs (Preview/Production):
+
+```bash
+npx vercel env add BLOB_READ_WRITE_TOKEN preview
+npx vercel env add BLOB_READ_WRITE_TOKEN production
+```
+
+Without the token, `POST /api/events` and profile edits still work; `POST /api/uploads/event-image` and `POST /api/uploads/avatar` return **503** with a clear error.
+
 ### Which Vercel environments?
 
 | Environment | Set `DATABASE_URL`? | Notes |
@@ -136,9 +161,10 @@ curl https://summerhacks-ebon.vercel.app/api/health
 # → {"ok":true,"store":"neon"}
 ```
 
-## Related bump docs
+## Related docs
 
 - [How bump works](bump/overview.md)
+- [Friends](friends/overview.md) · [Calendar](calendar/overview.md) · [Profile](profile/overview.md)
 - [Matching rules](bump/matching.md)
 - [Architecture](bump/architecture.md)
 - [Session bring-up notes](session-2026-08-08-vercel-neon.md)

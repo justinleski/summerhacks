@@ -1,0 +1,67 @@
+id: calendar
+version: 0.1.0
+name: Calendar
+status: implemented
+summary: >
+  Friends-only event calendar with RSVP, comments, event subscriptions, and
+  in-app activity fan-out. FOAF visibility via friends' attendance. Optional
+  event images via Vercel Blob.
+
+goals:
+  - Hosts publish events; friends auto-subscribe
+  - Calendar unions hosted + friends' + subscribed + FOAF going
+  - RSVP going/not_going with watcher notifications
+  - Comments notify event subscribers
+  - Activity inbox with read / read-all
+  - Optional event image upload (BLOB_READ_WRITE_TOKEN)
+
+non_goals:
+  - Browser/mobile push or WebSockets
+  - Public browse/search discovery
+  - Reusing blob for bump session photos
+
+constraints:
+  auth: requireAuth
+  delivery: activity feed + poll (ACTIVITY_POLL_INTERVAL_MS)
+  image_cap: ~4MB
+
+data_model:
+  - events
+  - event_attendees
+  - event_comments
+  - event_subscriptions
+  - activity_notifications
+
+apis:
+  - method: POST
+    path: /api/events
+  - method: GET
+    path: /api/calendar
+  - method: GET
+    path: /api/events/:id
+  - method: POST
+    path: /api/events/:id/rsvp
+  - method: POST
+    path: /api/events/:id/comments
+  - method: GET
+    path: /api/activity
+  - method: POST
+    path: /api/activity/:id/read
+  - method: POST
+    path: /api/activity/read-all
+  - method: POST
+    path: /api/uploads/event-image
+
+ux:
+  routes:
+    - /calendar
+    - /events/:id
+  home_nav: Calendar
+
+related_docs:
+  - docs/calendar/overview.md
+  - docs/calendar/architecture.md
+  - docs/calendar/api.md
+  - docs/calendar/data-model.md
+  - docs/deploy-vercel.md
+  - .context/features/calendar/BRIEFING.md

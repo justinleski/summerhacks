@@ -1,5 +1,14 @@
 import type {
+  ActivityNotification,
+  ActivityType,
   BumpStatus,
+  CalendarEvent,
+  EventComment,
+  EventDetail,
+  FriendRequest,
+  FriendRequestStatus,
+  FriendSummary,
+  RsvpStatus,
   Session,
   SessionPayload,
   SessionStatus,
@@ -17,6 +26,23 @@ export type GeoPlace = {
 
 export type StoredUser = User & {
   deviceId: string | null;
+  authUserId: string | null;
+  email: string | null;
+  friendCode: string;
+  bio: string | null;
+};
+
+export type UpdateProfileInput = {
+  displayName?: string;
+  bio?: string | null;
+  avatarUrl?: string | null;
+};
+
+export type UpsertAuthUserInput = {
+  authUserId: string;
+  displayName: string;
+  avatarUrl?: string | null;
+  email?: string | null;
 };
 
 export type StoredBumpIntent = {
@@ -62,12 +88,41 @@ export type CreateBumpInput = {
   expiresAt: Date;
 };
 
+export type StoredFriendRequest = {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  status: FriendRequestStatus;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateEventInput = {
+  hostUserId: string;
+  title: string;
+  description: string;
+  imageUrl: string | null;
+  startsAt: Date;
+  endsAt: Date | null;
+};
+
+export type FriendsMeResult = {
+  friendCode: string;
+  friends: FriendSummary[];
+};
+
+export type InboxFriendRequest = FriendRequest & {
+  fromUser: FriendSummary;
+};
+
 export interface Store {
   bootstrapUser(input: {
     displayName: string;
     deviceId?: string;
   }): Promise<StoredUser>;
+  upsertFromAuth(input: UpsertAuthUserInput): Promise<StoredUser>;
   getUser(id: string): Promise<StoredUser | null>;
+  getUserByAuthId(authUserId: string): Promise<StoredUser | null>;
   findBumpByIdempotency(
     userId: string,
     idempotencyKey: string,
@@ -84,8 +139,56 @@ export interface Store {
   getSession(id: string): Promise<Session | null>;
   listSessionsForUser(userId: string): Promise<Session[]>;
   confirmSession(sessionId: string, userId: string): Promise<Session | null>;
+  updateProfile(userId: string, input: UpdateProfileInput): Promise<StoredUser>;
+
+  // Friends
+  getFriendsMe(userId: string): Promise<FriendsMeResult>;
+  createFriendRequest(
+    fromUserId: string,
+    code: string,
+  ): Promise<StoredFriendRequest>;
+  listFriendInbox(userId: string): Promise<InboxFriendRequest[]>;
+  acceptFriendRequest(
+    userId: string,
+    requestId: string,
+  ): Promise<StoredFriendRequest>;
+  rejectFriendRequest(
+    userId: string,
+    requestId: string,
+  ): Promise<StoredFriendRequest>;
+  unfriend(userId: string, otherUserId: string): Promise<boolean>;
+
+  // Calendar / events
+  createEvent(input: CreateEventInput): Promise<CalendarEvent>;
+  listCalendar(userId: string): Promise<CalendarEvent[]>;
+  getEventDetail(userId: string, eventId: string): Promise<EventDetail | null>;
+  rsvpEvent(
+    userId: string,
+    eventId: string,
+    status: RsvpStatus,
+  ): Promise<EventDetail | null>;
+  addEventComment(
+    userId: string,
+    eventId: string,
+    body: string,
+  ): Promise<EventComment>;
+  listActivity(userId: string): Promise<ActivityNotification[]>;
+  markActivityRead(
+    userId: string,
+    notificationId: string,
+  ): Promise<ActivityNotification | null>;
+  markAllActivityRead(userId: string): Promise<number>;
 }
 
 export function toIso(d: Date): string {
   return d.toISOString();
 }
+
+export function orderedFriendshipPair(
+  a: string,
+  b: string,
+): { userAId: string; userBId: string } {
+  return a < b ? { userAId: a, userBId: b } : { userAId: b, userBId: a };
+}
+
+export type { ActivityType };
