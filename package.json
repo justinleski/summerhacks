@@ -1,0 +1,32 @@
+{
+  "name": "summerhacks",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:api & npm run dev:web",
+    "dev:web": "npm run dev -w @summerhacks/web",
+    "dev:api": "npm run dev -w @summerhacks/api",
+    "build": "npm run build -w @summerhacks/shared && npm run build -w @summerhacks/api && npm run build -w @summerhacks/web",
+    "typecheck": "npm run typecheck -w @summerhacks/shared && npm run typecheck -w @summerhacks/api && npm run typecheck -w @summerhacks/web",
+    "deploy": "vercel",
+    "deploy:prod": "vercel --prod"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "@summerhacks/shared": "*",
+    "drizzle-orm": "^0.40.0",
+    "hono": "^4.7.4",
+    "playwright": "^1.62.1",
+    "zod": "^3.24.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "vercel": "^58.9.0"
+  }
+}

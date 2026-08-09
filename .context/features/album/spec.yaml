@@ -1,0 +1,78 @@
+id: album
+version: 0.2.0
+name: Session album covers (vote / spin)
+status: implemented
+summary: >
+  After a bump session, each member draws their own pixel cover. When all
+  are ready (or the edit window ends), covers reveal for voting. Unanimous
+  votes win; contested / no selection resolves with a random spin and a
+  CS2-style client animation. Neon stores durable pixels; no PartyKit.
+
+goals:
+  - One cover per session member (unique session_id + user_id)
+  - Durable albums.pixels jsonb — reopen within 24h resumes
+  - Shared PixelCanvasEditor (profile avatar + album cover)
+  - REST autosave; poll for peer ready / votes (no websockets)
+  - Cover PNG via Vercel Blob (POST /api/uploads/album-cover)
+  - Vote or spin to pick the session cover
+  - editable_until = session.created_at + ALBUM_EDIT_WINDOW_MS (default 24h)
+
+non_goals:
+  - Live collaborative paint / PartyKit
+  - album_items / photo pages (document only; extend later)
+  - WebRTC / P2P proximity paint
+  - 32×32 UI toggle (schema accepts 32; ship 16)
+
+constraints:
+  deploy_api: vercel-hono
+  realtime: none-poll
+  durable: neon-albums-pixels
+  blob: BLOB_READ_WRITE_TOKEN
+  proximity_gate: bump-session-membership
+
+how_it_works:
+  - bump confirm → /session/:id → GET/POST album (mine)
+  - Draw own cover → PATCH; mark ready → lock
+  - All ready or editable_until → voting phase; poll GET album
+  - POST vote; unanimous → winner; else POST resolve / auto → spin
+  - Client CoverSpin animates onto server-chosen winner
+  - Save cover → Blob PNG → PATCH coverUrl
+
+data_model:
+  - albums (session_id + user_id)
+  - album_votes
+  - album_contests
+  - future: album_items
+
+apis:
+  - method: GET
+    path: /api/sessions/:id/album
+  - method: POST
+    path: /api/sessions/:id/album
+  - method: PATCH
+    path: /api/sessions/:id/album
+  - method: POST
+    path: /api/sessions/:id/album/ready
+  - method: POST
+    path: /api/sessions/:id/album/vote
+  - method: POST
+    path: /api/sessions/:id/album/resolve
+  - method: POST
+    path: /api/uploads/album-cover
+
+ops:
+  local:
+    - npm run dev
+    - optional ALBUM_EDIT_WINDOW_MS=60000 to test lock
+    - BLOB_READ_WRITE_TOKEN for cover PNG
+    - apply drizzle/0001_album_covers.sql or db:push
+  neon:
+    - npm run db:push -w @summerhacks/api after schema change
+
+related_docs:
+  - docs/album/overview.md
+  - docs/album/architecture.md
+  - docs/album/api.md
+  - docs/album/data-model.md
+  - .context/features/album/BRIEFING.md
+  - docs/bump/overview.md

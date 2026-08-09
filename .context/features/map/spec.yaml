@@ -1,0 +1,58 @@
+id: map
+version: 0.1.0
+name: Map / check-ins
+status: implemented
+summary: >
+  Authenticated Leaflet map of the caller's check-ins and non-watchlisted friends'
+  pins. Browser geolocation centers the map and stamps check-in coordinates.
+  Optional Blob photo + caption. Distinct from Bump matching (IP geo only).
+
+goals:
+  - /map as default authenticated landing (bump hub remains /home)
+  - Request browser geolocation; NYC fallback when denied/unavailable
+  - Create check-ins with lat/lng/region + optional caption/photo
+  - Show friends' pins excluding watchlisted friendships
+  - Emit anonymous connections row for Explore tally on create
+
+non_goals:
+  - Using browser GPS for bump matching
+  - Public/anonymous map of named users
+  - Edit or delete existing check-ins
+  - Realtime pin sync (reload / remount is enough)
+
+constraints:
+  auth: requireAuth on checkin + upload routes
+  location: browser-geolocation-for-map-only
+  blob: BLOB_READ_WRITE_TOKEN for checkin photos (optional; check-in works without photo)
+
+data_model:
+  - checkins
+  - connections (type=checkin side-effect; see explore)
+  - friendships.is_watchlisted (visibility filter; owned by friends)
+
+apis:
+  - method: POST
+    path: /api/checkins
+  - method: GET
+    path: /api/checkins/me
+  - method: GET
+    path: /api/checkins/friends
+  - method: GET
+    path: /api/checkins/friends/:friendId
+  - method: POST
+    path: /api/uploads/checkin-photo
+
+ux:
+  routes:
+    - /map
+  home_nav: Map
+  default_landing_after_auth: /map
+  geolocation: getCurrentPosition on mount; NYC fallback
+
+related_docs:
+  - docs/map/overview.md
+  - docs/map/api.md
+  - docs/map/data-model.md
+  - docs/friends/overview.md
+  - docs/explore/overview.md
+  - .context/features/map/BRIEFING.md

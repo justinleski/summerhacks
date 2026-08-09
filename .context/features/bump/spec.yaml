@@ -1,0 +1,206 @@
+id: bump
+version: 0.3.0
+name: Bump
+status: implemented
+summary: >
+  Classic accelerometer bump that pairs two users via time + IP geo
+  and opens a durable shared session that can be reopened without bumping again.
+  When auto-match expires, anonymous same-place avatar candidates can propose
+  a "was this you?" confirm that feeds the same session flow.
+
+goals:
+  - Enter explicit Bump Mode, request device-motion permission on user gesture
+  - Detect accelerometer peak (~threshold 16) and create a bump intent on the server
+  - Match two intents by time window + coarse Vercel IP geo (no browser geolocation)
+  - After expiry, show anonymous avatar candidates (same place, last ~45s) and propose/accept
+  - Create a durable shared session both users can reopen later
+  - Both members confirm peer before session becomes active
+  - Desktop/dev simulate-bump path without accelerometer
+
+non_goals:
+  - Browser geolocation / GPS matching
+  - Full social feed or photo graph
+  - NFC / QR fallback
+  - Strong anti-spoofing
+  - P2P / WebRTC pixel sync (album covers are per-user + vote/spin)
+constraints:
+  deploy: vercel
+  db: neon-postgres
+  location: ip-geo-only
+  realtime_mvp: polling
+  auth_mvp: lightweight-device-user
+
+how_it_works:
+  - bootstrap display name; token equals user id
+  - enter bump mode; motion permission on gesture; no GPS
+  - accel peak or simulate → POST /api/bumps with IP geo
+  - match ±2s server time + place; session pending_confirm
+  - poll GET /api/bumps/:id ~500ms (also retries match)
+  - if expired → GET candidates → propose → peer accept → same session flow
+  - both POST confirm → session active → /session/:id
+  - correctness: matched then confirm then shared sessionId (not haptics)
+
+# Ops memories — do not re-litigate
+ops:
+  local_store_switch: >
+    DATABASE_URL unset → in-memory (local two-tab OK).
+    DATABASE_URL set → Neon (required on Vercel for two-phone match).
+    No separate USE_REMOTE_DB flag. Quote & in .env URLs before sourcing.
+  secrets:
+    - .env and .env.local are gitignored
+    - .env.example stays in git (placeholders only)
+    - .vercel/ is gitignored (vercel link per machine)
+  vercel_api_entry:
+    - api/index.ts + vercel.json rewrite /api/(.*) → /api
+    - Never rely on Next-style api/[[...route]].ts on this non-Next project
+    - Export named GET/POST/… from hono/vercel handle (default Response ignored)
+    - Root package.json must have "type": "module"
+    - Dynamic import apps/api/src/app.js to avoid ERR_REQUIRE_ESM
+    - Vercel may print drizzle insert TS noise during function build; local typecheck is source of truth
+  neon_preview:
+    - Free Neon plan is enough for hackathon
+    - Enable DATABASE_URL on Preview and Production if demos use prod URL
+    - Development env usually off
+    - Skip per-deployment DB branches for MVP
+    - db:push once with local DATABASE_URL before relying on Preview bumps
+    - Cast match SQL params (::text/::float8) for Neon HTTP driver
+    - Verify GET /api/health store === neon
+  mobile_preview: >
+    Prefer Production (https://summerhacks-ebon.vercel.app) if Preview has
+    Vercel Authentication. Disable Deployment Protection for Preview if needed.
+    App display-name bootstrap is not that gate. Each phone needs its own user.
+    Correctness = matched + both confirm + shared sessionId (not haptics alone).
+  recreate_local:
+    - npm install && npm run build -w @summerhacks/shared
+    - cp .env.example .env
+    - npm run dev  # or vercel link + npm run deploy / deploy:prod
+  related_ops_docs:
+    - README.md
+    - docs/deploy-vercel.md
+    - docs/session-2026-08-08-vercel-neon.md
+    - .context/features/bump/BRIEFING.md
+
+stack:
+  web: vite-react-ts
+  api: hono-vercel
+  db: neon-postgres
+  orm: drizzle
+  monorepo:
+    - apps/web
+    - apps/api
+    - packages/shared
+
+data_model:
+  durable:
+    - users
+    - sessions
+    - session_members
+  ephemeral:
+    - bump_intents
+    - bump_proposals
+  flexible:
+    - sessions.payload jsonb
+  session_active_when: both members confirmedAt set
+
+apis:
+  - method: GET
+    path: /api/health
+    notes: store neon|memory from DATABASE_URL presence
+  - method: POST
+    path: /api/bumps
+    body: [clientTimestamp, peakMagnitude, idempotencyKey]
+    notes: Server attaches IP geo; tryMatchBump immediately
+  - method: GET
+    path: /api/bumps/:id
+    notes: Polled while searching; retries match; status pending|matched|expired
+  - method: DELETE
+    path: /api/bumps/:id
+    notes: Cancel when leaving Bump Mode
+  - method: GET
+    path: /api/bumps/:id/candidates
+    notes: Anonymous { bumpId, userId, avatarUrl }; same place; last BUMP_CANDIDATE_WINDOW_MS
+  - method: POST
+    path: /api/bumps/:id/propose
+    body: [targetBumpId]
+    notes: Create ephemeral was-this-you proposal
+  - method: GET
+    path: /api/bumps/proposals
+    notes: Pending incoming proposals for current user
+  - method: POST
+    path: /api/bumps/proposals/:id/accept
+    notes: Creates session pending_confirm like auto-match
+  - method: POST
+    path: /api/bumps/proposals/:id/reject
+  - method: GET
+    path: /api/sessions
+    notes: Current user recent sessions
+  - method: GET
+    path: /api/sessions/:id
+  - method: POST
+    path: /api/sessions/:id/confirm
+    notes: Both members must confirm for status active
+  - method: POST
+    path: /api/users/bootstrap
+    notes: Lightweight identity; token equals user id
+
+flows:
+  bump_match:
+    - enter_bump_mode
+    - request_motion_permission
+    - listen_for_accel_peak
+    - post_bump_intent
+    - poll_until_matched_or_expired
+    - optional_candidate_propose_accept
+    - confirm_peer_both_sides
+    - open_session
+    - optional_joint_album_cover
+  reopen_session:
+    - list_recent_sessions
+    - get_session_by_id
+    - edit_or_view_album_cover
+
+ux:
+  mode: bump-mode
+  peak_threshold: 16
+  states:
+    - idle
+    - listening
+    - searching
+    - matched_confirm
+    - expired
+    - proposal_incoming
+    - error
+  permissions:
+    - device-motion
+  haptics: magnitude-linked
+  haptics_notes: >
+    Android Chrome uses navigator.vibrate; iOS has no vibrate API —
+    drive a shared visual intensity meter on all platforms.
+
+matching:
+  time_window_ms: 2000
+  expiry_ms: 8000
+  candidate_window_ms: 45000
+  poll_interval_ms: 500
+  place: vercel-ip-geo
+  place_rules:
+    - same country and same city or region
+    - or lat/lng euclidean distance degrees less than 0.5
+    - or same IP
+  one_to_one: true
+  confirm_required: both_members
+  clock: server_receive_time
+  candidate_fallback: anonymous_avatars_no_display_name
+
+related_docs:
+  - docs/bump/overview.md
+  - docs/bump/architecture.md
+  - docs/bump/api.md
+  - docs/bump/data-model.md
+  - docs/bump/matching.md
+  - docs/album/overview.md
+  - docs/deploy-vercel.md
+  - docs/session-2026-08-08-vercel-neon.md
+  - README.md
+  - .context/features/bump/BRIEFING.md
+  - .context/features/album/spec.yaml

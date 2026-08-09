@@ -1,0 +1,382 @@
+import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import "leaflet/dist/leaflet.css";
+import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import {
+  CHECKIN_CAPTION_MAX,
+  type Checkin,
+  type FriendCheckin,
+} from "@summerhacks/shared";
+import { api, uploadCheckinPhoto } from "../../lib/api";
+import {
+  CARTO_ATTRIBUTION,
+  checkinIcon,
+  currentCartoTileUrl,
+  friendCheckinIcon,
+  meIcon,
+} from "./mapConfig";
+
+type LocStatus =
+  | "idle"
+  | "pending"
+  | "granted"
+  | "denied"
+  | "unavailable"
+  | "timeout"
+  | "unsupported";
+
+function locMessage(status: LocStatus): string {
+  switch (status) {
+    case "denied":
+      return "Location access was denied. Enable it in Settings, then try again.";
+    case "timeout":
+      return "Location timed out. Move somewhere with a clearer signal, then try again.";
+    case "unavailable":
+      return "Could not determine your location. Try again.";
+    case "unsupported":
+      return "This browser does not support location.";
+    default:
+      return "Beacon needs your location to place check-ins.";
+  }
+}
+
+export function MapPage() {
+  const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
+  const [locStatus, setLocStatus] = useState<LocStatus>("idle");
+  const [locating, setLocating] = useState(false);
+  const [checkins, setCheckins] = useState<Checkin[]>([]);
+  const [friendCheckins, setFriendCheckins] = useState<FriendCheckin[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [region, setRegion] = useState("");
+  const [caption, setCaption] = useState("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoInputKey, setPhotoInputKey] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [checkinsLoaded, setCheckinsLoaded] = useState(false);
+
+  const loadCheckins = useCallback(async () => {
+    const [mine, friends] = await Promise.all([
+      api<{ checkins: Checkin[] }>("/checkins/me"),
+      api<{ checkins: FriendCheckin[] }>("/checkins/friends"),
+    ]);
+    setCheckins(mine.checkins);
+    setFriendCheckins(friends.checkins);
+    setCheckinsLoaded(true);
+  }, []);
+
+  const requestLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      setMyLocation(null);
+      setLocStatus("unsupported");
+      setLocating(false);
+      return;
+    }
+
+    setLocating(true);
+    setLocStatus("pending");
+    setError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setMyLocation([pos.coords.latitude, pos.coords.longitude]);
+        setLocStatus("granted");
+        setLocating(false);
+      },
+      (err) => {
+        setMyLocation(null);
+        setLocating(false);
+        if (err.code === err.PERMISSION_DENIED) setLocStatus("denied");
+        else if (err.code === err.TIMEOUT) setLocStatus("timeout");
+        else setLocStatus("unavailable");
+      },
+      {
+        enableHighAccuracy: true,
+        // iOS Safari often needs longer than a short timeout before the sheet appears.
+        timeout: 20000,
+        maximumAge: 0,
+      },
+    );
+  }, []);
+
+  useEffect(() => {
+    loadCheckins().catch((err) =>
+      setError(err instanceof Error ? err.message : "Failed to load check-ins"),
+    );
+  }, [loadCheckins]);
+
+  // Always attempt geolocation on open. Do not invent a city fallback.
+  useEffect(() => {
+    requestLocation();
+  }, [requestLocation]);
+
+  const mapCenter: [number, number] | null =
+    myLocation ??
+    (checkins[0] ? [checkins[0].lat, checkins[0].lng] : null) ??
+    (friendCheckins[0]
+      ? [friendCheckins[0].lat, friendCheckins[0].lng]
+      : null);
+
+  const needsLocationGate =
+    locStatus !== "granted" && locStatus !== "pending" && locStatus !== "idle";
+
+  async function submitCheckin(e: FormEvent) {
+    e.preventDefault();
+    if (!myLocation) {
+      setError("Allow location before checking in.");
+      setShowModal(false);
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      let photoUrl: string | null = null;
+      if (photoFile) {
+        try {
+          photoUrl = await uploadCheckinPhoto(photoFile);
+        } catch (uploadErr) {
+          setError(
+            uploadErr instanceof Error
+              ? uploadErr.message
+              : "Photo upload failed",
+          );
+          setPhotoFile(null);
+          setPhotoInputKey((k) => k + 1);
+          setBusy(false);
+          return;
+        }
+      }
+      await api("/checkins", {
+        method: "POST",
+        body: JSON.stringify({
+          lat: myLocation[0],
+          lng: myLocation[1],
+          region: region.trim(),
+          caption: caption.trim() || undefined,
+          photoUrl,
+        }),
+      });
+      setRegion("");
+      setCaption("");
+      setPhotoFile(null);
+      setPhotoInputKey((k) => k + 1);
+      setShowModal(false);
+      await loadCheckins();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Check-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="map-page">
+      <header className="map-page__header">
+        <div>
+          <p className="eyebrow">Explore</p>
+          <h1>Map</h1>
+        </div>
+        <div className="map-page__header-actions">
+          <button
+            type="button"
+            className="primary"
+            disabled={!myLocation}
+            onClick={() => setShowModal(true)}
+          >
+            Check in
+          </button>
+          <Link className="text-link" to="/">
+            ← Home
+          </Link>
+        </div>
+      </header>
+
+      {error && <p className="error map-page__error">{error}</p>}
+
+      <div className="map-container">
+        {locating && !mapCenter ? (
+          <div className="map-page__location-gate">
+            <p className="muted">Finding your location…</p>
+            <p className="member-meta">
+              If nothing appears, tap Allow when iOS asks for location.
+            </p>
+          </div>
+        ) : mapCenter ? (
+          <>
+            {checkinsLoaded &&
+              checkins.length === 0 &&
+              friendCheckins.length === 0 &&
+              myLocation && (
+                <p className="map-page__empty">
+                  No check-ins yet; tap Check in to drop the first pin.
+                </p>
+              )}
+            <MapContainer
+              center={mapCenter}
+              zoom={13}
+              scrollWheelZoom
+              style={{ height: "100%", width: "100%" }}
+            >
+              <TileLayer
+                url={currentCartoTileUrl()}
+                attribution={CARTO_ATTRIBUTION}
+              />
+              {myLocation && (
+                <Marker position={myLocation} icon={meIcon}>
+                  <Popup>You are here</Popup>
+                </Marker>
+              )}
+              {checkins.map((c) => (
+                <Marker key={c.id} position={[c.lat, c.lng]} icon={checkinIcon}>
+                  <Popup>
+                    <strong>{c.region ?? "Somewhere"}</strong>
+                    {c.photoUrl && (
+                      <img
+                        src={c.photoUrl}
+                        alt=""
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          maxWidth: 200,
+                          borderRadius: 8,
+                          margin: "0.4rem 0",
+                        }}
+                      />
+                    )}
+                    {c.caption && (
+                      <p style={{ margin: "0.2rem 0" }}>{c.caption}</p>
+                    )}
+                    <span className="member-meta">
+                      {new Date(c.createdAt).toLocaleString()}
+                    </span>
+                  </Popup>
+                </Marker>
+              ))}
+              {friendCheckins.map((c) => (
+                <Marker
+                  key={c.id}
+                  position={[c.lat, c.lng]}
+                  icon={friendCheckinIcon}
+                  zIndexOffset={1000}
+                >
+                  <Popup>
+                    <strong>{c.region ?? "Somewhere"}</strong>
+                    <p className="member-meta" style={{ margin: "0.1rem 0" }}>
+                      {c.ownerDisplayName}
+                    </p>
+                    {c.photoUrl && (
+                      <img
+                        src={c.photoUrl}
+                        alt=""
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          maxWidth: 200,
+                          borderRadius: 8,
+                          margin: "0.4rem 0",
+                        }}
+                      />
+                    )}
+                    {c.caption && (
+                      <p style={{ margin: "0.2rem 0" }}>{c.caption}</p>
+                    )}
+                    <span className="member-meta">
+                      {new Date(c.createdAt).toLocaleString()}
+                    </span>
+                  </Popup>
+                </Marker>
+              ))}
+            </MapContainer>
+          </>
+        ) : (
+          <div className="map-page__location-gate">
+            <p>{locMessage(locStatus === "idle" ? "unavailable" : locStatus)}</p>
+            <button
+              type="button"
+              className="primary"
+              disabled={locating}
+              onClick={() => requestLocation()}
+            >
+              {locating ? "Asking…" : "Allow location"}
+            </button>
+          </div>
+        )}
+
+        {needsLocationGate && mapCenter && (
+          <div className="map-page__location-banner">
+            <p>{locMessage(locStatus)}</p>
+            <button
+              type="button"
+              className="primary"
+              disabled={locating}
+              onClick={() => requestLocation()}
+            >
+              {locating ? "Asking…" : "Allow location"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {showModal && (
+        <div
+          className="checkin-modal-overlay"
+          onClick={() => setShowModal(false)}
+        >
+          <div className="checkin-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Check in here</h2>
+            <form className="stack-form" onSubmit={submitCheckin}>
+              <label>
+                Region
+                <input
+                  value={region}
+                  onChange={(e) => setRegion(e.target.value)}
+                  placeholder="e.g. Downtown SF"
+                  maxLength={120}
+                  required
+                />
+              </label>
+              <label>
+                Caption (optional)
+                <textarea
+                  value={caption}
+                  onChange={(e) => setCaption(e.target.value)}
+                  maxLength={CHECKIN_CAPTION_MAX}
+                  rows={3}
+                  placeholder="What's happening?"
+                />
+                <span className="member-meta">
+                  {caption.length}/{CHECKIN_CAPTION_MAX}
+                </span>
+              </label>
+              <label>
+                Photo (optional)
+                <input
+                  key={photoInputKey}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <div className="checkin-modal__actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setShowModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={busy || !region.trim() || !myLocation}
+                >
+                  {busy ? "Checking in…" : "Check in"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}

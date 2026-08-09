@@ -1,0 +1,79 @@
+id: friends
+version: 0.2.0
+name: Friends
+status: implemented
+summary: >
+  Discord-style friend codes and inbox. Accepting a friend is bidirectional and
+  auto-subscribes both sides to each other's published calendar events (follow = friendship).
+  Each friendship also carries a watchlist flag that mutes that friend's check-ins from the
+  shared map feed while still allowing a scoped, check-ins-only view of their map.
+
+goals:
+  - Unique shareable friend_code per user
+  - Pending friend requests with Accept / Reject
+  - Canonical bidirectional friendships
+  - Unfriend support
+  - Auto-subscribe to friends' published events (calendar fan-out)
+  - Per-friendship watchlist toggle (friendships.is_watchlisted) that excludes that friend's
+    check-ins from GET /api/checkins/friends
+  - Scoped single-friend check-ins map, reachable regardless of watchlist state
+
+non_goals:
+  - Follow without friendship
+  - Public user search / discovery directory
+  - Push notifications
+  - General public profile pages — still a non-goal. /friends/:friendId/map is a narrow,
+    explicitly scoped exception: check-ins only, no bio/avatar-editing/other profile surface,
+    and gated on an accepted friendships row. It is not a step toward public profiles.
+
+constraints:
+  auth: requireAuth on all mutating + read routes
+  delivery: in-app activity + calendar poll
+  friend_map_scope: checkins-only; requires accepted friendship; not a profile page
+
+data_model:
+  - users.friend_code
+  - friend_requests (pending|accepted|rejected)
+  - friendships (user_a_id < user_b_id, is_watchlisted boolean default false)
+  - checkins (owned by users; visibility to friends governed by friendships.is_watchlisted —
+    see map/checkins feature for the table itself)
+
+apis:
+  - method: GET
+    path: /api/friends/me
+    notes: friends[] now includes isWatchlisted per friend
+  - method: POST
+    path: /api/friends/requests
+    body: [code]
+  - method: GET
+    path: /api/friends/inbox
+  - method: POST
+    path: /api/friends/requests/:id/accept
+  - method: POST
+    path: /api/friends/requests/:id/reject
+  - method: DELETE
+    path: /api/friends/:userId
+  - method: PATCH
+    path: /api/friends/:userId/watchlist
+    body: [isWatchlisted]
+    notes: 404 if not friends
+  - method: GET
+    path: /api/checkins/friends
+    notes: friends' check-ins excluding pairs where is_watchlisted = true
+  - method: GET
+    path: /api/checkins/friends/:friendId
+    notes: >
+      single friend's check-ins regardless of watchlist state; 403 unless requester has an
+      accepted friendships row with that friend
+
+ux:
+  routes:
+    - /friends
+    - /friends/:friendId/map
+  home_nav: Friends
+
+related_docs:
+  - docs/friends/overview.md
+  - docs/friends/api.md
+  - docs/friends/data-model.md
+  - .context/features/friends/BRIEFING.md

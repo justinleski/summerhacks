@@ -141,3 +141,15 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Monorepo build outputs
+dist/
+apps/*/dist/
+packages/*/dist/
+.vercel
+.env*
+
+# Local screenshot scratch
+.tmp-shots/
+.tmp
+

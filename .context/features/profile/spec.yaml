@@ -1,0 +1,47 @@
+id: profile
+version: 0.1.0
+name: Profile
+status: implemented
+summary: >
+  User profile page with display name, bio, 16×16 pixel avatar (Vercel Blob),
+  friend-code copy, logout, and client-side dark/light theme preference.
+
+goals:
+  - /profile route with home nav link
+  - Edit displayName + bio (≤280)
+  - Pixel avatar editor only (no photo file upload) → POST /api/uploads/avatar then PATCH /api/users/me
+  - Copy friend code on Profile (and Friends)
+  - Logout (clearAuth + Neon signOut)
+  - Dark/light theme via localStorage + data-theme
+
+non_goals:
+  - Public profile pages for other users
+  - Server-persisted theme preference
+  - Photo file picker for avatar (removed; pixel editor only)
+constraints:
+  blob: BLOB_READ_WRITE_TOKEN shared with event images
+  theme: client-only
+
+data_model:
+  - users.bio
+  - users.avatar_url
+
+apis:
+  - method: GET
+    path: /api/users/me
+  - method: PATCH
+    path: /api/users/me
+  - method: POST
+    path: /api/uploads/avatar
+
+ux:
+  routes:
+    - /profile
+  home_nav: Profile
+  theme_key: summerhacks.theme
+
+related_docs:
+  - docs/profile/overview.md
+  - docs/profile/api.md
+  - docs/profile/data-model.md
+  - .context/features/profile/BRIEFING.md
