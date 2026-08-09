@@ -1,8 +1,11 @@
 import {
   albumPixelsSchema,
   coverVoteBodySchema,
+  SERVER_OPEN_READ_CACHE_TTL_MS,
+  SERVER_SESSION_CACHE_TTL_MS,
   updateAlbumBodySchema,
   type PixelGridSize,
+  type Session,
   type SessionCoversResponse,
 } from "@summerhacks/shared";
 import { Hono } from "hono";
@@ -15,11 +18,25 @@ import {
   type Store,
   type StoredAlbum,
 } from "../db/types.js";
+import {
+  cacheKeys,
+  invalidateSessionReads,
+  readCache,
+} from "../lib/ttl-cache.js";
 import { requireAuth, type AuthVariables } from "../middleware/auth.js";
 
 export const sessionsRoutes = new Hono<{ Variables: AuthVariables }>();
 
 sessionsRoutes.use("*", requireAuth);
+
+async function getCachedSession(sessionId: string): Promise<Session | null> {
+  const key = cacheKeys.session(sessionId);
+  const hit = readCache.get<Session>(key);
+  if (hit) return hit;
+  const session = await getStore().getSession(sessionId);
+  if (session) readCache.set(key, session, SERVER_SESSION_CACHE_TTL_MS);
+  return session;
+}
 
 async function memberStore(
   sessionId: string,
@@ -29,7 +46,7 @@ async function memberStore(
   | { ok: false; status: 403 | 404; error: string }
 > {
   const store = getStore();
-  const session = await store.getSession(sessionId);
+  const session = await getCachedSession(sessionId);
   if (!session) return { ok: false, status: 404, error: "Not found" };
   if (!session.members.some((m) => m.userId === userId)) {
     return { ok: false, status: 403, error: "Forbidden" };
@@ -103,6 +120,27 @@ async function buildCoversResponse(
   };
 }
 
+async function cachedCoversResponse(
+  store: Store,
+  sessionId: string,
+  viewerId: string,
+  memberIds: string[],
+  sessionMembers: { userId: string; displayName: string }[],
+): Promise<SessionCoversResponse> {
+  const key = cacheKeys.covers(sessionId, viewerId);
+  const hit = readCache.get<SessionCoversResponse>(key);
+  if (hit) return hit;
+  const body = await buildCoversResponse(
+    store,
+    sessionId,
+    viewerId,
+    memberIds,
+    sessionMembers,
+  );
+  readCache.set(key, body, SERVER_OPEN_READ_CACHE_TTL_MS);
+  return body;
+}
+
 function coverHasArt(cover: StoredAlbum): boolean {
   if (cover.coverUrl) return true;
   return cover.pixels.some((p) => p != null);
@@ -138,13 +176,17 @@ async function maybeAutoResolve(
 }
 
 sessionsRoutes.get("/", async (c) => {
-  const sessions = await getStore().listSessionsForUser(c.get("userId"));
+  const userId = c.get("userId");
+  const key = cacheKeys.sessionsUser(userId);
+  const hit = readCache.get<Session[]>(key);
+  if (hit) return c.json({ sessions: hit });
+  const sessions = await getStore().listSessionsForUser(userId);
+  readCache.set(key, sessions, SERVER_SESSION_CACHE_TTL_MS);
   return c.json({ sessions });
 });
 
 sessionsRoutes.get("/:id", async (c) => {
-  const store = getStore();
-  const session = await store.getSession(c.req.param("id"));
+  const session = await getCachedSession(c.req.param("id"));
   if (!session) return c.json({ error: "Not found" }, 404);
   const isMember = session.members.some((m) => m.userId === c.get("userId"));
   if (!isMember) return c.json({ error: "Forbidden" }, 403);
@@ -153,8 +195,13 @@ sessionsRoutes.get("/:id", async (c) => {
 
 sessionsRoutes.post("/:id/confirm", async (c) => {
   const store = getStore();
-  const session = await store.confirmSession(c.req.param("id"), c.get("userId"));
+  const sessionId = c.req.param("id");
+  const session = await store.confirmSession(sessionId, c.get("userId"));
   if (!session) return c.json({ error: "Not found" }, 404);
+  invalidateSessionReads(
+    sessionId,
+    session.members.map((m) => m.userId),
+  );
   return c.json({ session });
 });
 
@@ -164,7 +211,7 @@ sessionsRoutes.get("/:id/album", async (c) => {
   const userId = c.get("userId");
   const gate = await memberStore(sessionId, userId);
   if (!gate.ok) return c.json({ error: gate.error }, gate.status);
-  const body = await buildCoversResponse(
+  const body = await cachedCoversResponse(
     gate.store,
     sessionId,
     userId,
@@ -182,6 +229,7 @@ sessionsRoutes.post("/:id/album", async (c) => {
   if (!gate.ok) return c.json({ error: gate.error }, gate.status);
   try {
     const album = await gate.store.createAlbumForUser(sessionId, userId);
+    invalidateSessionReads(sessionId, gate.memberIds);
     const name =
       gate.sessionMembers.find((m) => m.userId === userId)?.displayName ?? "You";
     return c.json({ album: toAlbumView(album, name) }, 201);
@@ -224,6 +272,7 @@ sessionsRoutes.patch("/:id/album", async (c) => {
     title: body.title,
   });
   if (!updated) return c.json({ error: "Not found" }, 404);
+  invalidateSessionReads(sessionId, gate.memberIds);
   const name =
     gate.sessionMembers.find((m) => m.userId === userId)?.displayName ?? "You";
   return c.json({ album: toAlbumView(updated, name) });
@@ -250,6 +299,7 @@ sessionsRoutes.post("/:id/album/ready", async (c) => {
   if (!updated) return c.json({ error: "Not found" }, 404);
 
   await maybeAutoResolve(gate.store, sessionId, gate.memberIds);
+  invalidateSessionReads(sessionId, gate.memberIds);
 
   const body = await buildCoversResponse(
     gate.store,
@@ -257,6 +307,11 @@ sessionsRoutes.post("/:id/album/ready", async (c) => {
     userId,
     gate.memberIds,
     gate.sessionMembers,
+  );
+  readCache.set(
+    cacheKeys.covers(sessionId, userId),
+    body,
+    SERVER_OPEN_READ_CACHE_TTL_MS,
   );
   return c.json(body);
 });
@@ -291,6 +346,7 @@ sessionsRoutes.post("/:id/album/vote", async (c) => {
 
   await gate.store.upsertAlbumVote(sessionId, userId, body.choiceUserId);
   await maybeAutoResolve(gate.store, sessionId, gate.memberIds);
+  invalidateSessionReads(sessionId, gate.memberIds);
 
   const res = await buildCoversResponse(
     gate.store,
@@ -298,6 +354,11 @@ sessionsRoutes.post("/:id/album/vote", async (c) => {
     userId,
     gate.memberIds,
     gate.sessionMembers,
+  );
+  readCache.set(
+    cacheKeys.covers(sessionId, userId),
+    res,
+    SERVER_OPEN_READ_CACHE_TTL_MS,
   );
   return c.json(res);
 });
@@ -324,6 +385,7 @@ sessionsRoutes.post("/:id/album/resolve", async (c) => {
   }
 
   await maybeAutoResolve(gate.store, sessionId, gate.memberIds, true);
+  invalidateSessionReads(sessionId, gate.memberIds);
 
   const res = await buildCoversResponse(
     gate.store,
@@ -331,6 +393,11 @@ sessionsRoutes.post("/:id/album/resolve", async (c) => {
     userId,
     gate.memberIds,
     gate.sessionMembers,
+  );
+  readCache.set(
+    cacheKeys.covers(sessionId, userId),
+    res,
+    SERVER_OPEN_READ_CACHE_TTL_MS,
   );
   return c.json(res);
 });

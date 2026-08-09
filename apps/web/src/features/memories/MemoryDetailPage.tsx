@@ -7,30 +7,66 @@ import type {
   SpotifyStatusResponse,
 } from "@summerhacks/shared";
 import { api } from "../../lib/api";
+import {
+  clientCacheKeys,
+  getCached,
+  LOCKED_TTL,
+  setCached,
+} from "../../lib/queryCache";
 import { PhotoboothCarousel } from "./PhotoboothCarousel";
 import { Receipt } from "./Receipt";
 
+function applyLocked(
+  locked: MemoryLockedResponse,
+  setMemory: (m: MemoryLockedResponse) => void,
+  setPlaylistUrl: (url: string | null) => void,
+) {
+  setMemory(locked);
+  setPlaylistUrl(locked.myPlaylist?.spotifyPlaylistUrl ?? null);
+}
+
 export function MemoryDetailPage() {
   const { id } = useParams();
-  const [memory, setMemory] = useState<MemoryLockedResponse | null>(null);
+  const [memory, setMemory] = useState<MemoryLockedResponse | null>(() => {
+    if (!id) return null;
+    const cached = getCached<MemoryLockedResponse>(
+      clientCacheKeys.memoryById(id),
+    );
+    return cached?.status === "locked" ? cached : null;
+  });
   const [stillOpenSessionId, setStillOpenSessionId] = useState<string | null>(
     null,
   );
   const [spotify, setSpotify] = useState<SpotifyStatusResponse | null>(null);
-  const [playlistUrl, setPlaylistUrl] = useState<string | null>(null);
+  const [playlistUrl, setPlaylistUrl] = useState<string | null>(() => {
+    if (!id) return null;
+    const cached = getCached<MemoryLockedResponse>(
+      clientCacheKeys.memoryById(id),
+    );
+    return cached?.status === "locked"
+      ? (cached.myPlaylist?.spotifyPlaylistUrl ?? null)
+      : null;
+  });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Locked memories are terminal, so this loads once — no polling.
+  // Locked memories are immutable — serve 7d cache and skip network on hit.
   const load = useCallback(async () => {
     if (!id) return;
+    const cacheKey = clientCacheKeys.memoryById(id);
+    const cached = getCached<MemoryLockedResponse>(cacheKey);
+    if (cached?.status === "locked") {
+      applyLocked(cached, setMemory, setPlaylistUrl);
+      return;
+    }
+
     const res = await api<{ memory: MemoryResponse }>(`/memories/${id}`);
     if (res.memory.status === "open") {
       setStillOpenSessionId(res.memory.sessionId);
       return;
     }
-    setMemory(res.memory);
-    setPlaylistUrl(res.memory.myPlaylist?.spotifyPlaylistUrl ?? null);
+    setCached(cacheKey, res.memory, LOCKED_TTL, { persistLocked: true });
+    applyLocked(res.memory, setMemory, setPlaylistUrl);
   }, [id]);
 
   useEffect(() => {
@@ -55,6 +91,18 @@ export function MemoryDetailPage() {
         { method: "POST" },
       );
       setPlaylistUrl(res.playlistUrl);
+      const updated: MemoryLockedResponse = {
+        ...memory,
+        myPlaylist: {
+          spotifyPlaylistId:
+            memory.myPlaylist?.spotifyPlaylistId ?? "exported",
+          spotifyPlaylistUrl: res.playlistUrl,
+        },
+      };
+      setMemory(updated);
+      setCached(clientCacheKeys.memoryById(memory.id), updated, LOCKED_TTL, {
+        persistLocked: true,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Playlist export failed");
     } finally {

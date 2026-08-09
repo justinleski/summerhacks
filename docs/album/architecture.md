@@ -26,7 +26,8 @@ flowchart LR
 | Neon `album_votes` / `album_contests` | Votes + winner |
 | Blob `cover_url` | Rendered PNG preview |
 | Hono `/sessions/:id/album*` | Membership, edit, ready, vote, resolve |
-| Client poll | Peer ready / contest state (no WS) |
+| Client poll | Peer ready / contest state (no WS) while open |
+| Read cache | Short in-process TTL on GETs; mutations invalidate. Locked interiors: see memories docs (7d client cache) |
 
 ## Lifecycle
 

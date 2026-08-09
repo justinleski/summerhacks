@@ -12,6 +12,13 @@ import {
   type SpotifyStatusResponse,
 } from "@summerhacks/shared";
 import { api, uploadMemoryPhoto } from "../../lib/api";
+import {
+  clientCacheKeys,
+  invalidateOpenAlbum,
+  LOCKED_TTL,
+  OPEN_TTL,
+  setCached,
+} from "../../lib/queryCache";
 import { formatCountdown, joinNames } from "./format";
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -40,10 +47,21 @@ export function MemoryBuildPage() {
       `/memories/session/${sessionId}`,
     );
     if (res.memory.status === "locked") {
+      setCached(
+        clientCacheKeys.memoryById(res.memory.id),
+        res.memory,
+        LOCKED_TTL,
+        { persistLocked: true },
+      );
       navigate(`/memories/${res.memory.id}`, { replace: true });
       return;
     }
     setMemory(res.memory);
+    setCached(
+      clientCacheKeys.memoryBySession(sessionId),
+      res.memory,
+      OPEN_TTL,
+    );
     if (!noteDirtyRef.current) setNote(res.memory.note ?? "");
   }, [sessionId, navigate]);
 
@@ -94,6 +112,7 @@ export function MemoryBuildPage() {
       for (const file of picked) {
         await uploadMemoryPhoto(memory.id, file);
       }
+      invalidateOpenAlbum(memory.sessionId, memory.id);
       await load();
     }, "Photo upload failed");
   }
@@ -104,6 +123,7 @@ export function MemoryBuildPage() {
       await api(`/memories/${memory.id}/photos/${photoId}`, {
         method: "DELETE",
       });
+      invalidateOpenAlbum(memory.sessionId, memory.id);
       await load();
     }, "Could not remove photo");
   }
@@ -135,6 +155,7 @@ export function MemoryBuildPage() {
             }
           : prev,
       );
+      invalidateOpenAlbum(memory.sessionId, memory.id);
       await load();
     }, "Could not add that track");
   }
@@ -145,6 +166,7 @@ export function MemoryBuildPage() {
       await api(`/memories/${memory.id}/songs/${position}`, {
         method: "DELETE",
       });
+      invalidateOpenAlbum(memory.sessionId, memory.id);
       await load();
     }, "Could not remove song");
   }
@@ -157,6 +179,7 @@ export function MemoryBuildPage() {
         body: JSON.stringify({ note: note.trim() || null }),
       });
       setNoteDirty(false);
+      invalidateOpenAlbum(memory.sessionId, memory.id);
       await load();
     }, "Could not save the note");
   }
@@ -169,7 +192,14 @@ export function MemoryBuildPage() {
         `/memories/${memory.id}/submit`,
         { method: "POST", body: JSON.stringify({ confirm: true }) },
       );
+      invalidateOpenAlbum(memory.sessionId, memory.id);
       if (res.memory.status === "locked") {
+        setCached(
+          clientCacheKeys.memoryById(res.memory.id),
+          res.memory,
+          LOCKED_TTL,
+          { persistLocked: true },
+        );
         navigate(`/memories/${res.memory.id}`, { replace: true });
         return;
       }

@@ -2,6 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { MemoryListItem } from "@summerhacks/shared";
 import { api } from "../../lib/api";
+import {
+  clientCacheKeys,
+  getCached,
+  LOCKED_LIST_TTL_MS,
+  setCached,
+} from "../../lib/queryCache";
 import { formatMemoryDate, initialsOf } from "./format";
 
 const SPOTIFY_NOTICES: Record<string, string> = {
@@ -12,18 +18,30 @@ const SPOTIFY_NOTICES: Record<string, string> = {
 
 export function MemoriesListPage() {
   const [searchParams] = useSearchParams();
-  const [memories, setMemories] = useState<MemoryListItem[]>([]);
+  const [memories, setMemories] = useState<MemoryListItem[]>(
+    () => getCached<MemoryListItem[]>(clientCacheKeys.memoriesList()) ?? [],
+  );
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(
+    () => getCached<MemoryListItem[]>(clientCacheKeys.memoriesList()) == null,
+  );
 
   const spotifyNotice = SPOTIFY_NOTICES[searchParams.get("spotify") ?? ""];
 
   const load = useCallback(async () => {
     const res = await api<{ memories: MemoryListItem[] }>("/memories");
     setMemories(res.memories);
+    setCached(clientCacheKeys.memoriesList(), res.memories, LOCKED_LIST_TTL_MS, {
+      persistLocked: true,
+    });
   }, []);
 
   useEffect(() => {
+    const cached = getCached<MemoryListItem[]>(clientCacheKeys.memoriesList());
+    if (cached) {
+      setMemories(cached);
+      setLoading(false);
+    }
     load()
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Failed to load memories"),

@@ -40,6 +40,7 @@ npm run dev
 ## Extension points
 
 - Album interior (songs/photos/receipt) lives in `memories*` tables — see `.context/features/memories/` and `docs/memories/`. Same `session_id` + 24h window as covers.
+- Open covers poll every `COVER_CONTEST_POLL_MS`; locked memory receipts are client-cached 7 days (immutable).
 - `grid_size` 32 UI when ready.
 
 ## Non-goals

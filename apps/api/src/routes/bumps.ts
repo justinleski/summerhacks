@@ -10,6 +10,7 @@ import {
 import { getStore } from "../db/index.js";
 import type { StoredBumpIntent, StoredBumpProposal, StoredUser } from "../db/types.js";
 import { toIso } from "../db/types.js";
+import { cacheKeys, readCache } from "../lib/ttl-cache.js";
 import { requireAuth, type AuthVariables } from "../middleware/auth.js";
 import { geoFromRequest } from "../services/geoFromRequest.js";
 import { httpErrorFromStore } from "./http-errors.js";
@@ -33,6 +34,17 @@ function bumpResponse(
     sessionId: bump.sessionId,
     peer: peer ? peerSummary(peer) : null,
   };
+}
+
+/** Drop stale home-session lists when a match creates a session. */
+function invalidateSessionsForMatch(
+  bump: StoredBumpIntent,
+  peer: StoredUser | null,
+): void {
+  if (!bump.sessionId) return;
+  readCache.delete(cacheKeys.sessionsUser(bump.userId));
+  if (peer) readCache.delete(cacheKeys.sessionsUser(peer.id));
+  readCache.delete(cacheKeys.session(bump.sessionId));
 }
 
 function proposalResponse(proposal: StoredBumpProposal): Omit<
@@ -73,6 +85,7 @@ bumpsRoutes.post("/", async (c) => {
   });
 
   const matched = await store.tryMatchBump(bump.id);
+  invalidateSessionsForMatch(matched.bump, matched.peer);
   return c.json(bumpResponse(matched.bump, matched.peer), 201);
 });
 
@@ -153,6 +166,7 @@ bumpsRoutes.get("/:id", async (c) => {
     if (partner) peer = await store.getUser(partner.userId);
   }
 
+  invalidateSessionsForMatch(matched.bump, peer);
   return c.json(bumpResponse(matched.bump, peer));
 });
 

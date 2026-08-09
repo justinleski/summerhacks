@@ -39,6 +39,16 @@ Window expires (cron every 15 min)
 
 `MemoryBuildPage` polls every `MEMORY_POLL_INTERVAL_MS` (2s). On `locked`, redirect to `/memories/:id`. No WebSockets.
 
+## Caching
+
+| State | Client | Server (in-process) |
+| --- | --- | --- |
+| Open draft / covers | ~15s memory cache; always revalidate on navigate; mutations invalidate | 5s GET TTL; cleared on write |
+| Locked memory detail | **7 days** in `localStorage` (immutable — skip network on hit) | 24h GET TTL |
+| Session list | ~15s memory + revalidate | 30s; batched query (no N+1) |
+
+Open collaborative polls stay at 1.5–2s so peers stay instant. Locked albums are read-only forever.
+
 ## Artifacts
 
 Receipt, photobooth strips, and per-member Spotify playlists — same as before. Playlist auto-export runs in the **sweeper** when locking (awaited), with manual `POST /export-playlist` recovery.

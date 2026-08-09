@@ -423,6 +423,17 @@ export const MEMORY_NOTE_MAX = 140;
 export const PHOTOBOOTH_SLOTS_PER_STRIP = 4;
 export const MEMORY_POLL_INTERVAL_MS = 2000;
 
+/** Client/server: locked memories are immutable — cache for a week. */
+export const LOCKED_MEMORY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Client in-memory TTL for open session / album / draft reads (then revalidate). */
+export const OPEN_READ_CACHE_TTL_MS = 15_000;
+/** Server in-process TTL for open memory / covers GET responses. */
+export const SERVER_OPEN_READ_CACHE_TTL_MS = 5_000;
+/** Server in-process TTL for session detail / session list. */
+export const SERVER_SESSION_CACHE_TTL_MS = 30_000;
+/** Server in-process TTL for locked memory GET responses. */
+export const SERVER_LOCKED_MEMORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
 /** Photos are contributed in pairs: 2, 4, 6, or 8 per member. */
 export const MEMORY_VALID_PHOTO_COUNTS = [2, 4, 6, 8] as const;
 

@@ -5,15 +5,24 @@ import {
   MEMORY_SONGS_PER_USER,
   parseSpotifyTrackId,
   putMemorySongBodySchema,
+  SERVER_LOCKED_MEMORY_CACHE_TTL_MS,
+  SERVER_OPEN_READ_CACHE_TTL_MS,
+  SERVER_SESSION_CACHE_TTL_MS,
   submitMemoryBodySchema,
   updateMemoryNoteBodySchema,
+  type MemoryListItem,
+  type MemoryResponse,
 } from "@summerhacks/shared";
 import { getStore } from "../db/index.js";
 import type { StoredMemoryAccess } from "../db/types.js";
+import {
+  cacheKeys,
+  invalidateMemoryReads,
+  readCache,
+} from "../lib/ttl-cache.js";
 import { requireAuth, type AuthVariables } from "../middleware/auth.js";
 import {
   exportMemoryPlaylist,
-  exportPlaylistsOnLock,
 } from "../services/memoryPlaylist.js";
 import { resolveSpotifyTrack } from "../services/spotify.js";
 import { httpErrorFromStore } from "./http-errors.js";
@@ -60,12 +69,33 @@ function parsePosition(raw: string): number {
   return position;
 }
 
+function memoryTtl(memory: MemoryResponse): number {
+  return memory.status === "locked"
+    ? SERVER_LOCKED_MEMORY_CACHE_TTL_MS
+    : SERVER_OPEN_READ_CACHE_TTL_MS;
+}
+
+function cacheMemory(memory: MemoryResponse, viewerId: string): void {
+  const ttl = memoryTtl(memory);
+  readCache.set(cacheKeys.memoryById(memory.id, viewerId), memory, ttl);
+  readCache.set(
+    cacheKeys.memoryBySession(memory.sessionId, viewerId),
+    memory,
+    ttl,
+  );
+}
+
 export const memoriesRoutes = new Hono<{ Variables: AuthVariables }>();
 
 memoriesRoutes.use("*", requireAuth);
 
 memoriesRoutes.get("/", async (c) => {
-  const memories = await getStore().listLockedMemoriesForUser(c.get("userId"));
+  const userId = c.get("userId");
+  const key = cacheKeys.lockedList(userId);
+  const hit = readCache.get<MemoryListItem[]>(key);
+  if (hit) return c.json({ memories: hit });
+  const memories = await getStore().listLockedMemoriesForUser(userId);
+  readCache.set(key, memories, SERVER_SESSION_CACHE_TTL_MS);
   return c.json({ memories });
 });
 
@@ -74,23 +104,43 @@ memoriesRoutes.get("/session/:sessionId", async (c) => {
   const userId = c.get("userId");
   const sessionId = c.req.param("sessionId");
 
-  const session = await store.getSession(sessionId);
+  const sessionKey = cacheKeys.session(sessionId);
+  let session = readCache.get<Awaited<ReturnType<typeof store.getSession>>>(
+    sessionKey,
+  );
+  if (!session) {
+    session = await store.getSession(sessionId);
+    if (session) {
+      readCache.set(sessionKey, session, SERVER_SESSION_CACHE_TTL_MS);
+    }
+  }
   if (!session) return c.json({ error: "Not found" }, 404);
   if (!session.members.some((m) => m.userId === userId)) {
     return c.json({ error: "Forbidden" }, 403);
   }
 
+  const memKey = cacheKeys.memoryBySession(sessionId, userId);
+  const cached = readCache.get<MemoryResponse>(memKey);
+  if (cached) return c.json({ memory: cached });
+
   const memory = await store.getMemoryBySessionId(sessionId, userId);
   if (!memory) return c.json({ error: "Not found" }, 404);
+  cacheMemory(memory, userId);
   return c.json({ memory });
 });
 
 memoriesRoutes.get("/:id", async (c) => {
   const userId = c.get("userId");
+  const memoryId = c.req.param("id");
   try {
-    await requireMemberAccess(c.req.param("id"), userId);
-    const memory = await getStore().getMemoryById(c.req.param("id"), userId);
+    const memKey = cacheKeys.memoryById(memoryId, userId);
+    const cached = readCache.get<MemoryResponse>(memKey);
+    if (cached) return c.json({ memory: cached });
+
+    await requireMemberAccess(memoryId, userId);
+    const memory = await getStore().getMemoryById(memoryId, userId);
     if (!memory) return c.json({ error: "Not found" }, 404);
+    cacheMemory(memory, userId);
     return c.json({ memory });
   } catch (err) {
     return httpErrorFromStore(c, err);
@@ -141,6 +191,11 @@ memoriesRoutes.post("/:id/photos", async (c) => {
     });
 
     const photo = await getStore().addMemoryPhoto(memoryId, userId, blob.url);
+    invalidateMemoryReads(
+      memoryId,
+      access.memory.sessionId,
+      access.memberUserIds,
+    );
     return c.json({ photo }, 201);
   } catch (err) {
     return httpErrorFromStore(c, err);
@@ -160,6 +215,11 @@ memoriesRoutes.delete("/:id/photos/:photoId", async (c) => {
       c.req.param("photoId"),
     );
     if (!removed) return c.json({ error: "Photo not found" }, 404);
+    invalidateMemoryReads(
+      memoryId,
+      access.memory.sessionId,
+      access.memberUserIds,
+    );
     return c.json({ ok: true });
   } catch (err) {
     return httpErrorFromStore(c, err);
@@ -190,6 +250,11 @@ memoriesRoutes.put("/:id/songs/:position", async (c) => {
       position,
       metadata,
     );
+    invalidateMemoryReads(
+      memoryId,
+      access.memory.sessionId,
+      access.memberUserIds,
+    );
     return c.json({ song });
   } catch (err) {
     return httpErrorFromStore(c, err);
@@ -210,6 +275,11 @@ memoriesRoutes.delete("/:id/songs/:position", async (c) => {
       position,
     );
     if (!removed) return c.json({ error: "Song not found" }, 404);
+    invalidateMemoryReads(
+      memoryId,
+      access.memory.sessionId,
+      access.memberUserIds,
+    );
     return c.json({ ok: true });
   } catch (err) {
     return httpErrorFromStore(c, err);
@@ -228,6 +298,11 @@ memoriesRoutes.patch("/:id/note", async (c) => {
     const note = body.note?.trim() ? body.note.trim() : null;
     const updated = await getStore().updateMemoryNote(memoryId, note);
     if (!updated) return c.json({ error: "Not found" }, 404);
+    invalidateMemoryReads(
+      memoryId,
+      access.memory.sessionId,
+      access.memberUserIds,
+    );
     return c.json({ note: updated.note });
   } catch (err) {
     return httpErrorFromStore(c, err);
@@ -240,15 +315,22 @@ memoriesRoutes.post("/:id/submit", async (c) => {
   const userId = c.get("userId");
   submitMemoryBodySchema.parse(await c.req.json());
 
+  let access: StoredMemoryAccess;
   try {
-    const access = await requireMemberAccess(memoryId, userId);
+    access = await requireMemberAccess(memoryId, userId);
     assertOpen(access);
     await getStore().submitMemory(memoryId, userId);
   } catch (err) {
     return httpErrorFromStore(c, err);
   }
 
+  invalidateMemoryReads(
+    memoryId,
+    access.memory.sessionId,
+    access.memberUserIds,
+  );
   const memory = await getStore().getMemoryById(memoryId, userId);
+  if (memory) cacheMemory(memory, userId);
   return c.json({ memory });
 });
 
@@ -256,8 +338,10 @@ memoriesRoutes.post("/:id/export-playlist", async (c) => {
   const memoryId = c.req.param("id");
   const userId = c.get("userId");
   try {
-    await requireMemberAccess(memoryId, userId);
+    const access = await requireMemberAccess(memoryId, userId);
     const result = await exportMemoryPlaylist(memoryId, userId);
+    // Playlist URL is part of locked payload — refresh that viewer's cache.
+    invalidateMemoryReads(memoryId, access.memory.sessionId, [userId]);
     return c.json(result);
   } catch (err) {
     return httpErrorFromStore(c, err);

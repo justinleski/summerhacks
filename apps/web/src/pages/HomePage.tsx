@@ -20,6 +20,13 @@ import {
   setNeedsName,
 } from "../lib/api";
 import {
+  clientCacheKeys,
+  getCached,
+  invalidate,
+  OPEN_TTL,
+  setCached,
+} from "../lib/queryCache";
+import {
   authClient,
   getNeonSession,
   neonAuthEnabled,
@@ -41,7 +48,9 @@ export function HomePage() {
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [name, setName] = useState(getDisplayName() || "");
   const [nameDraft, setNameDraft] = useState("");
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessions, setSessions] = useState<Session[]>(
+    () => getCached<Session[]>(clientCacheKeys.sessions()) ?? [],
+  );
   const [bumpOpen, setBumpOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -52,8 +61,11 @@ export function HomePage() {
   const clearToast = useCallback(() => setToast(null), []);
 
   async function loadSessions() {
+    const cached = getCached<Session[]>(clientCacheKeys.sessions());
+    if (cached) setSessions(cached);
     const res = await api<{ sessions: Session[] }>("/sessions");
     setSessions(res.sessions);
+    setCached(clientCacheKeys.sessions(), res.sessions, OPEN_TTL);
   }
 
   const enterFromNeonSession = useCallback(async (opts: { needsName: boolean }) => {
@@ -216,6 +228,7 @@ export function HomePage() {
       // ignore
     }
     clearAuth();
+    invalidate(clientCacheKeys.sessions());
     setSessions([]);
     setName("");
     setNameDraft("");

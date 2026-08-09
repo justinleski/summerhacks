@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   gt,
+  inArray,
   isNotNull,
   lt,
   ne,
@@ -26,7 +27,6 @@ import {
   type EventComment,
   type EventDetail,
   type FriendSummary,
-  type MemoryListItem,
   type MemoryMember,
   type MemoryPhoto,
   type MemoryResponse,
@@ -1263,7 +1263,7 @@ export function createNeonStore(databaseUrl: string): Store {
     },
 
     async listSessionsForUser(userId) {
-      const rows = await db
+      const memberSessionRows = await db
         .select({ session: schema.sessions })
         .from(schema.sessionMembers)
         .innerJoin(
@@ -1273,12 +1273,51 @@ export function createNeonStore(databaseUrl: string): Store {
         .where(eq(schema.sessionMembers.userId, userId))
         .orderBy(desc(schema.sessions.createdAt));
 
-      const sessions: Session[] = [];
-      for (const { session } of rows) {
-        const full = await loadSession(session.id);
-        if (full) sessions.push(full);
+      if (memberSessionRows.length === 0) return [];
+
+      const sessionIds = memberSessionRows.map(({ session }) => session.id);
+      const allMemberRows = await db
+        .select({
+          member: schema.sessionMembers,
+          user: schema.users,
+        })
+        .from(schema.sessionMembers)
+        .innerJoin(
+          schema.users,
+          eq(schema.sessionMembers.userId, schema.users.id),
+        )
+        .where(inArray(schema.sessionMembers.sessionId, sessionIds));
+
+      const membersBySession = new Map<
+        string,
+        Array<{
+          userId: string;
+          displayName: string;
+          avatarUrl: string | null;
+          joinedAt: string;
+          confirmedAt: string | null;
+        }>
+      >();
+      for (const { member, user } of allMemberRows) {
+        const list = membersBySession.get(member.sessionId) ?? [];
+        list.push({
+          userId: member.userId,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl,
+          joinedAt: toIso(member.joinedAt),
+          confirmedAt: member.confirmedAt ? toIso(member.confirmedAt) : null,
+        });
+        membersBySession.set(member.sessionId, list);
       }
-      return sessions;
+
+      return memberSessionRows.map(({ session }) => ({
+        id: session.id,
+        createdVia: "bump" as const,
+        status: session.status as Session["status"],
+        payload: session.payload,
+        createdAt: toIso(session.createdAt),
+        members: membersBySession.get(session.id) ?? [],
+      }));
     },
 
     async confirmSession(sessionId, userId) {
@@ -2018,38 +2057,76 @@ export function createNeonStore(databaseUrl: string): Store {
         )
         .orderBy(desc(schema.memories.windowStartsAt));
 
-      const result: MemoryListItem[] = [];
-      for (const { memory: row } of rows) {
-        const memory = mapMemory(row);
-        const memberRows = await loadSessionMemberUsers(memory.sessionId);
+      if (rows.length === 0) return [];
 
-        // Cover = first frame of the first photobooth strip (interleave index 0).
-        const [cover] = await db
-          .select({ photoUrl: schema.memoryPhotos.photoUrl })
-          .from(schema.memoryPhotos)
-          .where(eq(schema.memoryPhotos.memoryId, memory.id))
-          .orderBy(
-            asc(schema.memoryPhotos.userId),
-            asc(schema.memoryPhotos.uploadOrder),
-          )
-          .limit(1);
+      const memories = rows.map(({ memory }) => mapMemory(memory));
+      const memoryIds = memories.map((m) => m.id);
+      const sessionIds = [...new Set(memories.map((m) => m.sessionId))];
 
-        const [songRow] = await db
-          .select({ value: sql<number>`count(*)::int` })
-          .from(schema.memorySongs)
-          .where(eq(schema.memorySongs.memoryId, memory.id));
+      const allMemberRows = await db
+        .select({
+          member: schema.sessionMembers,
+          user: schema.users,
+        })
+        .from(schema.sessionMembers)
+        .innerJoin(
+          schema.users,
+          eq(schema.sessionMembers.userId, schema.users.id),
+        )
+        .where(inArray(schema.sessionMembers.sessionId, sessionIds))
+        .orderBy(asc(schema.sessionMembers.userId));
 
-        result.push({
-          id: memory.id,
-          sessionId: memory.sessionId,
-          hangoutAt: toIso(memory.windowStartsAt),
-          lockedAt: toIso(memory.lockedAt ?? memory.windowExpiresAt),
-          memberDisplayNames: memberRows.map(({ user }) => user.displayName),
-          coverPhotoUrl: cover?.photoUrl ?? null,
-          songCount: songRow?.value ?? 0,
-        });
+      const namesBySession = new Map<string, string[]>();
+      for (const { member, user } of allMemberRows) {
+        const list = namesBySession.get(member.sessionId) ?? [];
+        list.push(user.displayName);
+        namesBySession.set(member.sessionId, list);
       }
-      return result;
+
+      // Cover = first frame of the first photobooth strip (userId, uploadOrder).
+      const photoRows = await db
+        .select({
+          memoryId: schema.memoryPhotos.memoryId,
+          photoUrl: schema.memoryPhotos.photoUrl,
+          userId: schema.memoryPhotos.userId,
+          uploadOrder: schema.memoryPhotos.uploadOrder,
+        })
+        .from(schema.memoryPhotos)
+        .where(inArray(schema.memoryPhotos.memoryId, memoryIds))
+        .orderBy(
+          asc(schema.memoryPhotos.userId),
+          asc(schema.memoryPhotos.uploadOrder),
+        );
+
+      const coverByMemory = new Map<string, string>();
+      for (const photo of photoRows) {
+        if (!coverByMemory.has(photo.memoryId)) {
+          coverByMemory.set(photo.memoryId, photo.photoUrl);
+        }
+      }
+
+      const songCountRows = await db
+        .select({
+          memoryId: schema.memorySongs.memoryId,
+          value: sql<number>`count(*)::int`,
+        })
+        .from(schema.memorySongs)
+        .where(inArray(schema.memorySongs.memoryId, memoryIds))
+        .groupBy(schema.memorySongs.memoryId);
+
+      const songCountByMemory = new Map(
+        songCountRows.map((r) => [r.memoryId, r.value] as const),
+      );
+
+      return memories.map((memory) => ({
+        id: memory.id,
+        sessionId: memory.sessionId,
+        hangoutAt: toIso(memory.windowStartsAt),
+        lockedAt: toIso(memory.lockedAt ?? memory.windowExpiresAt),
+        memberDisplayNames: namesBySession.get(memory.sessionId) ?? [],
+        coverPhotoUrl: coverByMemory.get(memory.id) ?? null,
+        songCount: songCountByMemory.get(memory.id) ?? 0,
+      }));
     },
 
     async addMemoryPhoto(memoryId, userId, photoUrl) {

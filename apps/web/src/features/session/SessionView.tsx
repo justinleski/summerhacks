@@ -10,6 +10,14 @@ import {
   type SessionCoversResponse,
 } from "@summerhacks/shared";
 import { api } from "../../lib/api";
+import {
+  clientCacheKeys,
+  getCached,
+  invalidate,
+  LOCKED_TTL,
+  OPEN_TTL,
+  setCached,
+} from "../../lib/queryCache";
 import { AlbumCoverEditor } from "../album/AlbumCoverEditor";
 import { CoverSpin } from "../album/CoverSpin";
 import { formatCountdown } from "../memories/format";
@@ -66,36 +74,49 @@ export function SessionView() {
   const [now, setNow] = useState(() => Date.now());
   const spinPlayedRef = useRef(false);
 
-  const applyCovers = useCallback((res: SessionCoversResponse) => {
-    setCovers(res.covers);
-    setMine(res.mine);
-    setContest(res.contest);
-    if (
-      res.contest.phase === "resolved" &&
-      res.contest.method === "spin" &&
-      !spinPlayedRef.current
-    ) {
-      setSpinning(true);
-    }
-  }, []);
+  const applyCovers = useCallback(
+    (res: SessionCoversResponse, sessionId?: string) => {
+      setCovers(res.covers);
+      setMine(res.mine);
+      setContest(res.contest);
+      if (sessionId) {
+        setCached(clientCacheKeys.covers(sessionId), res, OPEN_TTL);
+      }
+      if (
+        res.contest.phase === "resolved" &&
+        res.contest.method === "spin" &&
+        !spinPlayedRef.current
+      ) {
+        setSpinning(true);
+      }
+    },
+    [],
+  );
 
   const loadCovers = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, opts?: { bypassCache?: boolean }) => {
       try {
+        if (!opts?.bypassCache) {
+          const cached = getCached<SessionCoversResponse>(
+            clientCacheKeys.covers(sessionId),
+          );
+          if (cached) applyCovers(cached, sessionId);
+        }
         const res = await api<SessionCoversResponse>(
           `/sessions/${sessionId}/album`,
         );
-        applyCovers(res);
+        applyCovers(res, sessionId);
         if (!res.mine) {
           const created = await api<{ album: AlbumCover }>(
             `/sessions/${sessionId}/album`,
             { method: "POST" },
           );
           setMine(created.album);
+          invalidate(clientCacheKeys.covers(sessionId));
           const again = await api<SessionCoversResponse>(
             `/sessions/${sessionId}/album`,
           );
-          applyCovers(again);
+          applyCovers(again, sessionId);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load covers");
@@ -110,9 +131,13 @@ export function SessionView() {
       .then((me) => setMeId(me.id))
       .catch(() => setMeId(null));
 
+    const cachedSession = getCached<Session>(clientCacheKeys.session(id));
+    if (cachedSession) setSession(cachedSession);
+
     api<{ session: Session }>(`/sessions/${id}`)
       .then(async (res) => {
         setSession(res.session);
+        setCached(clientCacheKeys.session(id), res.session, OPEN_TTL);
         await loadCovers(res.session.id);
       })
       .catch((err) =>
@@ -122,9 +147,27 @@ export function SessionView() {
 
   useEffect(() => {
     if (!id) return;
+    const cached = getCached<MemoryResponse>(
+      clientCacheKeys.memoryBySession(id),
+    );
+    if (cached) setMemory(cached);
+
     // 404 here just means this session predates Memories, or the window expired.
     api<{ memory: MemoryResponse }>(`/memories/session/${id}`)
-      .then((res) => setMemory(res.memory))
+      .then((res) => {
+        setMemory(res.memory);
+        const ttl =
+          res.memory.status === "locked" ? LOCKED_TTL : OPEN_TTL;
+        setCached(clientCacheKeys.memoryBySession(id), res.memory, ttl);
+        if (res.memory.status === "locked") {
+          setCached(
+            clientCacheKeys.memoryById(res.memory.id),
+            res.memory,
+            ttl,
+            { persistLocked: true },
+          );
+        }
+      })
       .catch(() => setMemory(null));
   }, [id]);
 
@@ -138,7 +181,7 @@ export function SessionView() {
     if (!id || !contest) return;
     if (contest.phase === "resolved" && !spinning) return;
     const t = setInterval(() => {
-      void loadCovers(id);
+      void loadCovers(id, { bypassCache: true });
     }, COVER_CONTEST_POLL_MS);
     return () => clearInterval(t);
   }, [id, contest, spinning, loadCovers]);
@@ -148,11 +191,12 @@ export function SessionView() {
     setBusy(true);
     setError(null);
     try {
+      invalidate(clientCacheKeys.covers(id));
       const res = await api<SessionCoversResponse>(
         `/sessions/${id}/album/ready`,
         { method: "POST" },
       );
-      applyCovers(res);
+      applyCovers(res, id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not mark ready");
     } finally {
@@ -165,6 +209,7 @@ export function SessionView() {
     setBusy(true);
     setError(null);
     try {
+      invalidate(clientCacheKeys.covers(id));
       const res = await api<SessionCoversResponse>(
         `/sessions/${id}/album/vote`,
         {
@@ -172,7 +217,7 @@ export function SessionView() {
           body: JSON.stringify({ choiceUserId }),
         },
       );
-      applyCovers(res);
+      applyCovers(res, id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Vote failed");
     } finally {
@@ -185,11 +230,12 @@ export function SessionView() {
     setBusy(true);
     setError(null);
     try {
+      invalidate(clientCacheKeys.covers(id));
       const res = await api<SessionCoversResponse>(
         `/sessions/${id}/album/resolve`,
         { method: "POST" },
       );
-      applyCovers(res);
+      applyCovers(res, id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Resolve failed");
     } finally {
@@ -466,6 +512,7 @@ export function SessionView() {
           open={editorOpen}
           onClose={() => setEditorOpen(false)}
           onAlbumUpdated={(album) => {
+            invalidate(clientCacheKeys.covers(session.id));
             setMine(album);
             setCovers((prev) => {
               const others = prev.filter((c) => c.userId !== album.userId);
