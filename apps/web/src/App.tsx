@@ -9,6 +9,7 @@ import { MemoryDetailPage } from "./features/memories/MemoryDetailPage";
 import { ProfilePage } from "./features/profile/ProfilePage";
 import { SessionView } from "./features/session/SessionView";
 import { HomePage } from "./pages/HomePage";
+import { LoginDarkPage, LoginLightPage } from "./pages/LoginLayouts";
 
 export function App() {
   return (
@@ -19,6 +20,8 @@ export function App() {
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/events/:id" element={<EventDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/login-light" element={<LoginLightPage />} />
+        <Route path="/login-dark" element={<LoginDarkPage />} />
         <Route path="/session/:id" element={<SessionView />} />
         <Route path="/memories" element={<MemoriesListPage />} />
         <Route
