@@ -44,6 +44,14 @@ export function spotifyConfigured(): boolean {
   );
 }
 
+/** Client-credentials track lookup only needs id + secret (no OAuth redirect). */
+export function spotifyClientCredentialsConfigured(): boolean {
+  return Boolean(
+    process.env.SPOTIFY_CLIENT_ID?.trim() &&
+      process.env.SPOTIFY_CLIENT_SECRET?.trim(),
+  );
+}
+
 /** OAuth `state` is signed with CRON_SECRET (single shared secret for MVP). */
 function stateSecret(): Uint8Array {
   const value = process.env.CRON_SECRET?.trim();
@@ -142,35 +150,59 @@ type SpotifyTrack = {
   album: { images: { url: string }[] };
 };
 
+/** Offline / unconfigured fallback so paste still works without Spotify env. */
+function fallbackTrackMetadata(trackId: string): MemorySongInput {
+  return {
+    spotifyUrl: `https://open.spotify.com/track/${trackId}`,
+    spotifyTrackId: trackId,
+    trackTitle: "Spotify track",
+    artistName: "Unknown artist",
+    albumArtUrl: null,
+  };
+}
+
 /**
  * Resolve pasted-track metadata server-side. Uses a cached client-credentials
  * token, so members never need to connect Spotify just to add a song.
+ * When Spotify credentials are missing or the API fails, stores a placeholder
+ * so album editing still works.
  */
 export async function resolveSpotifyTrack(
   trackId: string,
 ): Promise<MemorySongInput> {
-  const token = await getClientCredentialsToken();
-  const res = await fetch(`${API_BASE}/tracks/${trackId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (res.status === 404) {
-    throw spotifyError("That Spotify track was not found", 404);
-  }
-  if (!res.ok) {
-    const text = await res.text();
-    console.warn("Spotify track lookup failed", res.status, text);
-    throw spotifyError("Could not read that track from Spotify", 502);
+  if (!spotifyClientCredentialsConfigured()) {
+    return fallbackTrackMetadata(trackId);
   }
 
-  const track = (await res.json()) as SpotifyTrack;
-  return {
-    // Canonical URL so the stored value is always a valid https link.
-    spotifyUrl: `https://open.spotify.com/track/${track.id}`,
-    spotifyTrackId: track.id,
-    trackTitle: track.name,
-    artistName: track.artists[0]?.name ?? "Unknown artist",
-    albumArtUrl: track.album?.images?.[0]?.url ?? null,
-  };
+  try {
+    const token = await getClientCredentialsToken();
+    const res = await fetch(`${API_BASE}/tracks/${trackId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 404) {
+      throw spotifyError("That Spotify track was not found", 404);
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      console.warn("Spotify track lookup failed", res.status, text);
+      return fallbackTrackMetadata(trackId);
+    }
+
+    const track = (await res.json()) as SpotifyTrack;
+    return {
+      // Canonical URL so the stored value is always a valid https link.
+      spotifyUrl: `https://open.spotify.com/track/${track.id}`,
+      spotifyTrackId: track.id,
+      trackTitle: track.name,
+      artistName: track.artists[0]?.name ?? "Unknown artist",
+      albumArtUrl: track.album?.images?.[0]?.url ?? null,
+    };
+  } catch (err) {
+    const status = (err as Error & { status?: number }).status;
+    if (status === 404) throw err;
+    console.warn("Spotify track resolve failed; using fallback metadata", err);
+    return fallbackTrackMetadata(trackId);
+  }
 }
 
 // --- User tokens ---

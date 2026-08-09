@@ -359,9 +359,6 @@ export function HomePage() {
           </button>
         </div>
         {error && <p className="error">{error}</p>}
-        <Link className="text-link" to="/explore">
-          Or view public activity, no login needed →
-        </Link>
         <Toast message={toast} onDone={clearToast} />
       </main>
     );

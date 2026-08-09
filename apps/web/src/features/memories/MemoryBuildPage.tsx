@@ -9,7 +9,6 @@ import {
   type MemoryDraftResponse,
   type MemoryResponse,
   type MemorySong,
-  type SpotifyStatusResponse,
 } from "@summerhacks/shared";
 import { api, uploadMemoryPhoto } from "../../lib/api";
 import {
@@ -19,6 +18,7 @@ import {
   OPEN_TTL,
   setCached,
 } from "../../lib/queryCache";
+import { AlbumWindowBar } from "../album/AlbumWindowBar";
 import { formatCountdown, joinNames } from "./format";
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -34,12 +34,13 @@ export function MemoryBuildPage() {
   const [note, setNote] = useState("");
   const [noteDirty, setNoteDirty] = useState(false);
   const [songDrafts, setSongDrafts] = useState<Record<number, string>>({});
-  const [spotify, setSpotify] = useState<SpotifyStatusResponse | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const noteDirtyRef = useRef(false);
   noteDirtyRef.current = noteDirty;
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     if (!sessionId) return;
@@ -83,12 +84,6 @@ export function MemoryBuildPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    api<SpotifyStatusResponse>("/spotify/status")
-      .then(setSpotify)
-      .catch(() => setSpotify({ connected: false, spotifyUserId: null }));
-  }, []);
-
   async function withBusy(fn: () => Promise<void>, fallback: string) {
     setBusy(true);
     setError(null);
@@ -128,8 +123,8 @@ export function MemoryBuildPage() {
     }, "Could not remove photo");
   }
 
-  async function saveSong(position: number) {
-    const spotifyUrl = (songDrafts[position] ?? "").trim();
+  async function saveSong(position: number, urlOverride?: string) {
+    const spotifyUrl = (urlOverride ?? songDrafts[position] ?? "").trim();
     if (!memory || !spotifyUrl) return;
     await withBusy(async () => {
       const res = await api<{ song: MemorySong }>(
@@ -156,7 +151,6 @@ export function MemoryBuildPage() {
           : prev,
       );
       invalidateOpenAlbum(memory.sessionId, memory.id);
-      await load();
     }, "Could not add that track");
   }
 
@@ -207,13 +201,6 @@ export function MemoryBuildPage() {
     }, "Could not mark done");
   }
 
-  async function connectSpotify() {
-    await withBusy(async () => {
-      const res = await api<{ authUrl: string }>("/spotify/connect");
-      window.location.href = res.authUrl;
-    }, "Could not start Spotify sign-in");
-  }
-
   if (error && !memory) {
     return (
       <main className="page">
@@ -237,20 +224,28 @@ export function MemoryBuildPage() {
   const urgent = msLeft < ONE_HOUR_MS;
   const photoCount = memory.myPhotos.length;
   const photosValid = isValidMemoryPhotoCount(photoCount);
-  const songsValid = memory.mySongs.length === MEMORY_SONGS_PER_USER;
+  const songsValid = memory.mySongs.length <= MEMORY_SONGS_PER_USER;
   const canMarkDone = photosValid && songsValid && !busy;
-  const peerPhotos = memory.photos.filter((p) => !memory.myPhotos.some((m) => m.id === p.id));
+  const peerPhotos = memory.photos.filter(
+    (p) => !memory.myPhotos.some((m) => m.id === p.id),
+  );
   const peerSongs = memory.songs.filter(
     (s) => !memory.mySongs.some((m) => m.id === s.id),
   );
   const nameByUser = new Map(
     memory.members.map((m) => [m.userId, m.displayName] as const),
   );
+  const canAddPhotos = photoCount < MEMORY_MAX_PHOTOS_PER_USER;
 
   return (
     <main className="page memory-build-page">
       <p className="eyebrow">Album interior</p>
       <h1>Photos & songs</h1>
+      <AlbumWindowBar
+        expiresAt={memory.windowExpiresAt}
+        startsAt={memory.windowStartsAt}
+        now={now}
+      />
       <p className={urgent ? "memory-countdown error" : "memory-countdown"}>
         {formatCountdown(msLeft)} left to edit
       </p>
@@ -301,12 +296,15 @@ export function MemoryBuildPage() {
       <section className="stack-section">
         <div className="section-head">
           <h2>Your photos</h2>
-          <span className={photosValid ? "member-meta" : "error"}>
-            {photoCount}/{MEMORY_MAX_PHOTOS_PER_USER}
-            {photosValid ? " · ready" : " · need an even number"}
+          <span className="member-meta">
+            {photoCount}/{MEMORY_MAX_PHOTOS_PER_USER} · up to{" "}
+            {MEMORY_MAX_PHOTOS_PER_USER}
           </span>
         </div>
-        <p className="muted">Add photos in pairs (2, 4, 6, or 8). Compressed before upload.</p>
+        <p className="muted">
+          Add up to {MEMORY_MAX_PHOTOS_PER_USER} photos from your camera or
+          gallery. Compressed before upload.
+        </p>
         <div className="photo-grid">
           {memory.myPhotos.map((photo) => (
             <div className="photo-grid__item" key={photo.id}>
@@ -322,24 +320,51 @@ export function MemoryBuildPage() {
               </button>
             </div>
           ))}
-          {photoCount < MEMORY_MAX_PHOTOS_PER_USER && (
-            <label className="photo-grid__add">
-              <span aria-hidden>+</span>
-              <span className="member-meta">Add</span>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                multiple
-                disabled={busy}
-                onChange={(e) => {
-                  void addPhotos(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-          )}
         </div>
+        {canAddPhotos && (
+          <div className="photo-add-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => cameraInputRef.current?.click()}
+            >
+              Take photo
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => galleryInputRef.current?.click()}
+            >
+              Pick from gallery
+            </button>
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              hidden
+              disabled={busy}
+              onChange={(e) => {
+                void addPhotos(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <input
+              ref={galleryInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              disabled={busy}
+              onChange={(e) => {
+                void addPhotos(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+        )}
       </section>
 
       {peerPhotos.length > 0 && (
@@ -361,10 +386,15 @@ export function MemoryBuildPage() {
       <section className="stack-section">
         <div className="section-head">
           <h2>Your songs</h2>
-          <span className={songsValid ? "member-meta" : "error"}>
-            {memory.mySongs.length}/{MEMORY_SONGS_PER_USER}
+          <span className="member-meta">
+            {memory.mySongs.length}/{MEMORY_SONGS_PER_USER} · up to{" "}
+            {MEMORY_SONGS_PER_USER}
           </span>
         </div>
+        <p className="muted">
+          Paste a Spotify track link into any open slot. Connecting Spotify is
+          optional — only needed later to export a playlist.
+        </p>
         <div className="song-slots">
           {SONG_SLOTS.map((position) => {
             const song = memory.mySongs.find((s) => s.position === position);
@@ -393,7 +423,7 @@ export function MemoryBuildPage() {
                     disabled={busy}
                     onClick={() => void removeSong(position)}
                   >
-                    Remove
+                    Replace
                   </button>
                 </div>
               );
@@ -419,10 +449,18 @@ export function MemoryBuildPage() {
                     const pasted = e.clipboardData.getData("text");
                     if (!pasted.trim()) return;
                     e.preventDefault();
+                    const next = pasted.trim();
                     setSongDrafts((prev) => ({
                       ...prev,
-                      [position]: pasted.trim(),
+                      [position]: next,
                     }));
+                    void saveSong(position, next);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void saveSong(position);
+                    }
                   }}
                 />
                 <button
@@ -497,33 +535,11 @@ export function MemoryBuildPage() {
         />
       </section>
 
-      <section className="stack-section">
-        {spotify?.connected ? (
-          <p className="muted">
-            Spotify connected — playlists export when the album locks.
-          </p>
-        ) : (
-          <div className="spotify-banner">
-            <p>Want the playlist saved to your Spotify?</p>
-            <button
-              type="button"
-              className="secondary"
-              disabled={busy}
-              onClick={() => void connectSpotify()}
-            >
-              Connect now
-            </button>
-          </div>
-        )}
-      </section>
-
       <div className="submit-bar">
         <span className="member-meta">
           {memory.mySubmitted
             ? `Marked done — you can still edit until ${formatCountdown(msLeft)} left`
-            : songsValid && photosValid
-              ? "Optional: mark yourself done"
-              : `Need ${MEMORY_SONGS_PER_USER} songs and an even photo count`}
+            : "Optional: mark yourself done anytime"}
         </span>
         <button
           type="button"
@@ -540,8 +556,11 @@ export function MemoryBuildPage() {
           <div className="memory-modal__card">
             <h2>Mark yourself done?</h2>
             <p className="muted">
-              This tells {joinNames(
-                memory.members.filter((m) => !m.isViewer).map((m) => m.displayName),
+              This tells{" "}
+              {joinNames(
+                memory.members
+                  .filter((m) => !m.isViewer)
+                  .map((m) => m.displayName),
               )}{" "}
               you&apos;re finished — you can still edit until the 24h window
               ends.

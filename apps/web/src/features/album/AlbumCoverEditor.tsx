@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { AlbumCover, PixelGridSize } from "@summerhacks/shared";
 import { emptyPixelGrid } from "@summerhacks/shared";
 import { api, uploadAlbumCover } from "../../lib/api";
@@ -30,74 +30,18 @@ export function AlbumCoverEditor({
   onAlbumUpdated,
 }: AlbumCoverEditorProps) {
   const gridSize: PixelGridSize = album.gridSize === 32 ? 32 : 16;
-  const [pixels, setPixels] = useState<(string | null)[]>(() =>
-    album.pixels.length === gridSize * gridSize
-      ? album.pixels.slice()
-      : emptyPixelGrid(gridSize),
-  );
   const [busy, setBusy] = useState(false);
   const [persistError, setPersistError] = useState<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    setPixels(
-      album.pixels.length === gridSize * gridSize
-        ? album.pixels.slice()
-        : emptyPixelGrid(gridSize),
-    );
-  }, [open, album.id, album.updatedAt, album.pixels, gridSize]);
-
-  const persistPixels = useCallback(
-    async (next: (string | null)[]) => {
-      try {
-        const res = await api<{ album: AlbumCover }>(
-          `/sessions/${sessionId}/album`,
-          {
-            method: "PATCH",
-            body: JSON.stringify({ pixels: next }),
-          },
-        );
-        onAlbumUpdated(res.album);
-        setPersistError(null);
-      } catch (err) {
-        setPersistError(
-          err instanceof Error ? err.message : "Failed to save pixels",
-        );
-      }
-    },
-    [sessionId, onAlbumUpdated],
-  );
-
-  const schedulePersist = useCallback(
-    (next: (string | null)[]) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        void persistPixels(next);
-      }, 1500);
-    },
-    [persistPixels],
-  );
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  function handlePixelsChange(next: (string | null)[]) {
-    setPixels(next);
-    schedulePersist(next);
-  }
+  const initialPixels =
+    album.pixels.length === gridSize * gridSize
+      ? album.pixels
+      : emptyPixelGrid(gridSize);
 
   async function handleSave(file: File, finalPixels: (string | null)[]) {
     setBusy(true);
     setPersistError(null);
     try {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
       const coverUrl = await uploadAlbumCover(file);
       const res = await api<{ album: AlbumCover }>(
         `/sessions/${sessionId}/album`,
@@ -120,15 +64,14 @@ export function AlbumCoverEditor({
     <PixelCanvasEditor
       open={open}
       gridSize={gridSize}
-      pixels={pixels}
-      onPixelsChange={handlePixelsChange}
+      initialPixels={initialPixels}
       busy={busy}
       readOnly={!album.editable}
       eyebrow="Your cover"
       title="Draw your cover"
       hint={
         album.editable
-          ? `${gridSize}×${gridSize} · ${formatRemaining(album.editableUntil)} · autosaves`
+          ? `${gridSize}×${gridSize} · ${formatRemaining(album.editableUntil)} · save when done`
           : album.readyAt
             ? "You marked ready · cover locked"
             : "Edit window ended · cover is locked"

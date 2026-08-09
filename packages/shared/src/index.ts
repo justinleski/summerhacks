@@ -520,7 +520,8 @@ export type CoverVoteBody = z.infer<typeof coverVoteBodySchema>;
 /** Same window as album covers — alias of ALBUM_EDIT_WINDOW_MS. */
 export const MEMORY_WINDOW_MS = ALBUM_EDIT_WINDOW_MS;
 export const MEMORY_MAX_PHOTOS_PER_USER = 8;
-export const MEMORY_MIN_PHOTOS_PER_USER = 2;
+/** Soft floor for “mark done” — 0 photos is allowed; uploads capped at MAX. */
+export const MEMORY_MIN_PHOTOS_PER_USER = 0;
 export const MEMORY_SONGS_PER_USER = 3;
 export const MEMORY_NOTE_MAX = 140;
 export const PHOTOBOOTH_SLOTS_PER_STRIP = 4;
@@ -537,14 +538,14 @@ export const SERVER_SESSION_CACHE_TTL_MS = 30_000;
 /** Server in-process TTL for locked memory GET responses. */
 export const SERVER_LOCKED_MEMORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** Photos are contributed in pairs: 2, 4, 6, or 8 per member. */
-export const MEMORY_VALID_PHOTO_COUNTS = [2, 4, 6, 8] as const;
+/** Up to MEMORY_MAX_PHOTOS_PER_USER per member — any count in range is fine. */
+export const MEMORY_VALID_PHOTO_COUNTS = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 export function isValidMemoryPhotoCount(count: number): boolean {
   return (
+    Number.isInteger(count) &&
     count >= MEMORY_MIN_PHOTOS_PER_USER &&
-    count <= MEMORY_MAX_PHOTOS_PER_USER &&
-    count % 2 === 0
+    count <= MEMORY_MAX_PHOTOS_PER_USER
   );
 }
 

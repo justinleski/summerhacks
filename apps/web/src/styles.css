@@ -866,6 +866,33 @@ html[data-theme="light"] .pixel-swatch--empty {
   margin: 0.25rem 0 0.5rem;
 }
 
+.album-window-bar {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  max-width: 22rem;
+  margin: 0.35rem 0 0.15rem;
+}
+
+.album-window-bar__seg {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 10px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.album-window-bar__seg--on {
+  background: var(--accent);
+}
+
+.photo-add-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
 .memory-cta {
   display: grid;
   gap: 0.75rem;

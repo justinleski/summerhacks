@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   BUMP_CANDIDATE_WINDOW_MS,
   MATCH_TIME_WINDOW_MS,
+  MEMORY_MAX_PHOTOS_PER_USER,
   MEMORY_SONGS_PER_USER,
   TALLY_WINDOW_DAYS,
   emptyPixelGrid,
@@ -1746,15 +1747,18 @@ export function createMemoryStore(): Store {
       const positions = new Set(
         memorySongRows(memoryId, userId).map((s) => s.position),
       );
-      if (positions.size !== MEMORY_SONGS_PER_USER) {
+      if (positions.size > MEMORY_SONGS_PER_USER) {
         throw storeError(
-          `Add ${MEMORY_SONGS_PER_USER} songs before marking done`,
+          `At most ${MEMORY_SONGS_PER_USER} songs per person`,
           400,
         );
       }
       const photoCount = memoryPhotoRows(memoryId, userId).length;
       if (!isValidMemoryPhotoCount(photoCount)) {
-        throw storeError("Photos must come in pairs (2, 4, 6, or 8)", 400);
+        throw storeError(
+          `Add at most ${MEMORY_MAX_PHOTOS_PER_USER} photos`,
+          400,
+        );
       }
 
       const now = new Date();

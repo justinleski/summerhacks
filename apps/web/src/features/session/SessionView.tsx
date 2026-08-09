@@ -19,6 +19,7 @@ import {
   setCached,
 } from "../../lib/queryCache";
 import { AlbumCoverEditor } from "../album/AlbumCoverEditor";
+import { AlbumWindowBar } from "../album/AlbumWindowBar";
 import { CoverSpin } from "../album/CoverSpin";
 import { formatCountdown } from "../memories/format";
 
@@ -176,15 +177,16 @@ export function SessionView() {
     return () => window.clearInterval(timer);
   }, []);
 
-  // Poll while editing/voting so peers' ready/votes show up without websockets.
+  // Poll for peer ready / votes — skip while the pixel editor is open so
+  // drawing stays fully client-side until Save.
   useEffect(() => {
-    if (!id || !contest) return;
+    if (!id || !contest || editorOpen) return;
     if (contest.phase === "resolved" && !spinning) return;
     const t = setInterval(() => {
       void loadCovers(id, { bypassCache: true });
     }, COVER_CONTEST_POLL_MS);
     return () => clearInterval(t);
-  }, [id, contest, spinning, loadCovers]);
+  }, [id, contest, spinning, loadCovers, editorOpen]);
 
   async function markReady() {
     if (!id) return;
@@ -268,6 +270,14 @@ export function SessionView() {
     ? new Date(memory.windowExpiresAt).getTime() - now
     : 0;
   const windowClosed = Boolean(memory) && msLeft <= 0;
+  const windowExpiresAt =
+    memory?.windowExpiresAt ?? mine?.editableUntil ?? null;
+  const windowStartsAt = memory?.windowStartsAt;
+  const peersReady = covers.filter(
+    (c) => c.userId !== meId && c.readyAt,
+  ).length;
+  const peersTotal = covers.filter((c) => c.userId !== meId).length;
+  const editingCovers = covers.length > 0 ? covers : mine ? [mine] : [];
 
   return (
     <main className="page session-page">
@@ -293,13 +303,22 @@ export function SessionView() {
 
       <section className="stack-section album-cover-block">
         <h2>Album cover</h2>
+        {windowExpiresAt && (
+          <AlbumWindowBar
+            expiresAt={windowExpiresAt}
+            startsAt={windowStartsAt}
+            now={now}
+          />
+        )}
         <p className="muted">
           {phase === "editing" &&
             (mine
               ? mine.editable
                 ? formatRemaining(mine.editableUntil)
                 : mine.readyAt
-                  ? "Waiting for everyone to ready up…"
+                  ? peersReady >= peersTotal && peersTotal > 0
+                    ? "Everyone is ready — opening reveal…"
+                    : `Ready — waiting for others (${peersReady}/${peersTotal})`
                   : "Edit window ended — voting opens soon."
               : "Loading your cover…")}
           {phase === "voting" && "Reveal — vote for your favorite, or spin."}
@@ -325,12 +344,11 @@ export function SessionView() {
 
         {!spinning && (
           <div className="cover-grid">
-            {(showReveal ? covers : mine ? [mine] : []).map((c) => {
+            {(showReveal ? covers : editingCovers).map((c) => {
               const isMine = c.userId === meId;
               const isWinner =
                 phase === "resolved" && c.userId === contest?.winnerUserId;
-              const peerHidden =
-                phase === "editing" && !isMine && c.pixels.length === 0;
+              const peerHidden = phase === "editing" && !isMine;
               return (
                 <article
                   key={c.userId}
@@ -348,7 +366,7 @@ export function SessionView() {
                       className="album-cover-preview album-cover-preview--empty"
                       aria-hidden
                     >
-                      Drawing…
+                      {c.readyAt ? "Ready" : "Drawing…"}
                     </div>
                   ) : (
                     coverPreview(c)
@@ -439,6 +457,11 @@ export function SessionView() {
       {memory?.status === "open" && !windowClosed && (
         <section className="stack-section memory-cta">
           <h2>Album photos & songs</h2>
+          <AlbumWindowBar
+            expiresAt={memory.windowExpiresAt}
+            startsAt={memory.windowStartsAt}
+            now={now}
+          />
           <p className="lede">{formatCountdown(msLeft)} left to edit</p>
           <p className="muted">
             Inside this album: Spotify tracks and photos that become the

@@ -69,7 +69,22 @@ async function buildCoversResponse(
   memberIds: string[],
   sessionMembers: { userId: string; displayName: string }[],
 ): Promise<SessionCoversResponse> {
-  const covers = await store.listAlbumsForSession(sessionId);
+  let covers = await store.listAlbumsForSession(sessionId);
+
+  // Ensure every member has an album row so "all ready" can complete when
+  // both people mark ready (lazy create previously left peers missing).
+  for (const memberId of memberIds) {
+    if (covers.some((c) => c.userId === memberId)) continue;
+    try {
+      await store.createAlbumForUser(sessionId, memberId);
+    } catch {
+      // Race / not found — ignore; phase math still uses whatever rows exist.
+    }
+  }
+  if (covers.length < memberIds.length) {
+    covers = await store.listAlbumsForSession(sessionId);
+  }
+
   const contestRow = await store.getAlbumContest(sessionId);
   const votes = await store.listAlbumVotes(sessionId);
   const phase = computeContestPhase({
@@ -86,25 +101,37 @@ async function buildCoversResponse(
     .filter((c) => revealPeers || c.userId === viewerId)
     .map((c) => toAlbumView(c, nameById.get(c.userId) ?? "Member"));
 
-  // During editing, still surface placeholder slots for peers (no pixels).
+  // During editing, surface peer slots without pixels, but keep readyAt so
+  // both clients can see who has locked in (fixes "stuck on ready" UX).
   if (!revealPeers) {
     for (const m of sessionMembers) {
       if (views.some((v) => v.userId === m.userId)) continue;
-      views.push({
-        id: "00000000-0000-0000-0000-000000000000",
-        sessionId,
-        userId: m.userId,
-        displayName: m.displayName,
-        title: null,
-        gridSize: 16,
-        pixels: [],
-        coverUrl: null,
-        editableUntil: new Date(Date.now() + 86_400_000).toISOString(),
-        readyAt: null,
-        createdAt: new Date(0).toISOString(),
-        updatedAt: new Date(0).toISOString(),
-        editable: false,
-      });
+      const peerRow = covers.find((c) => c.userId === m.userId);
+      if (peerRow) {
+        const peerView = toAlbumView(peerRow, m.displayName);
+        views.push({
+          ...peerView,
+          pixels: [],
+          coverUrl: null,
+          editable: false,
+        });
+      } else {
+        views.push({
+          id: "00000000-0000-0000-0000-000000000000",
+          sessionId,
+          userId: m.userId,
+          displayName: m.displayName,
+          title: null,
+          gridSize: 16,
+          pixels: [],
+          coverUrl: null,
+          editableUntil: new Date(Date.now() + 86_400_000).toISOString(),
+          readyAt: null,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          editable: false,
+        });
+      }
     }
   }
 

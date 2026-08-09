@@ -140,6 +140,8 @@ export function PixelCanvasEditor({
 
   useEffect(() => {
     if (!open) return;
+    // Only re-seed local canvas when the modal opens, not when parent
+    // `initialPixels` identity changes mid-edit (e.g. album poll).
     if (!controlled) {
       setLocalPixels(
         initialPixels?.length === gridSize * gridSize
@@ -151,7 +153,8 @@ export function PixelCanvasEditor({
     setTool("paint");
     setError(null);
     setSaving(false);
-  }, [open, gridSize, initialPixels, controlled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: open edge only
+  }, [open, gridSize, controlled]);
 
   useEffect(() => {
     if (!open) return;
