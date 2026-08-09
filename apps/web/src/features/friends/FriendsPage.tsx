@@ -179,7 +179,7 @@ export function FriendsPage() {
         {!me ? (
           <p className="muted">Loading…</p>
         ) : me.friends.length === 0 ? (
-          <p className="muted">No friends yet — share your code.</p>
+          <p className="muted">No friends yet; share your code.</p>
         ) : (
           <ul className="plain-list">
             {me.friends.map((f) => (

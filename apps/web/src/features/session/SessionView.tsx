@@ -334,11 +334,11 @@ export function SessionView() {
                 ? formatRemaining(mine.editableUntil)
                 : mine.readyAt
                   ? peersReady >= peersTotal && peersTotal > 0
-                    ? "Everyone is ready — opening reveal…"
-                    : `Ready — waiting for others (${peersReady}/${peersTotal})`
-                  : "Edit window ended — voting opens soon."
+                    ? "Everyone is ready; opening reveal…"
+                    : `Ready: waiting for others (${peersReady}/${peersTotal})`
+                  : "Edit window ended; voting opens soon."
               : "Loading your cover…")}
-          {phase === "voting" && "Reveal — vote for your favorite, or spin."}
+          {phase === "voting" && "Reveal: vote for your favorite, or spin."}
           {phase === "resolved" &&
             !spinning &&
             (contest?.method === "vote"
@@ -451,7 +451,7 @@ export function SessionView() {
 
         {phase === "voting" && myVote && (
           <p className="muted">
-            Vote in — waiting for others, or{" "}
+            Vote in; waiting for others, or{" "}
             <button
               type="button"
               className="text-link"
@@ -511,7 +511,7 @@ export function SessionView() {
       {memory?.status === "locked" && (
         <section className="stack-section memory-cta">
           <h2>Album receipt</h2>
-          <p className="muted">Locked — photos, songs, and receipt are final.</p>
+          <p className="muted">Locked: photos, songs, and receipt are final.</p>
           <Link className="primary" to={`/memories/${memory.id}`}>
             View receipt
           </Link>
@@ -523,7 +523,7 @@ export function SessionView() {
           <h2>Album interior</h2>
           <p className="muted">
             {windowClosed
-              ? "Edit window ended — receipt locks when the sweeper runs."
+              ? "Edit window ended; receipt locks when the sweeper runs."
               : "No album interior for this session."}
           </p>
         </section>

@@ -26,13 +26,13 @@ const variantCopy: Record<
 > = {
   light: {
     art: "/login/login-light.png",
-    eyebrow: "Summerhacks",
+    eyebrow: "Beacon",
     title: "Welcome back",
     subtitle: "Sign in to keep your sessions, friends, and memories together.",
   },
   dark: {
     art: "/login/login-dark.png",
-    eyebrow: "Summerhacks",
+    eyebrow: "Beacon",
     title: "Welcome back",
     subtitle: "Pick up where the night left off.",
   },
@@ -129,7 +129,7 @@ export function LoginChrome({
 export function LoginLightPage() {
   return (
     <LoginChrome variant="light">
-      <p className="login-form__subtitle">Preview only — use Home to sign in.</p>
+      <p className="login-form__subtitle">Preview only: use Home to sign in.</p>
     </LoginChrome>
   );
 }
@@ -138,7 +138,7 @@ export function LoginLightPage() {
 export function LoginDarkPage() {
   return (
     <LoginChrome variant="dark">
-      <p className="login-form__subtitle">Preview only — use Home to sign in.</p>
+      <p className="login-form__subtitle">Preview only: use Home to sign in.</p>
     </LoginChrome>
   );
 }

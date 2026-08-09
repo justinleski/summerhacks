@@ -6,7 +6,7 @@ export function RecentSessions({ sessions }: { sessions: Session[] }) {
     return (
       <section className="recent">
         <h2>Recent connections</h2>
-        <p className="muted">No sessions yet — bump with someone to start.</p>
+        <p className="muted">No sessions yet; bump with someone to start.</p>
       </section>
     );
   }

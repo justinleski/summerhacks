@@ -185,7 +185,7 @@ export function Receipt({ memory }: { memory: MemoryLockedResponse }) {
 
         <Barcode seed={memory.id} />
         <p className="receipt__permalink">
-          summerhacks · {shortMemoryId(memory.id)}
+          beacon · {shortMemoryId(memory.id)}
         </p>
       </section>
     </div>

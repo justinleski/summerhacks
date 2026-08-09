@@ -595,8 +595,8 @@ export function MemoryBuildPage() {
         </button>
         <p className="memory-count">
           {memory.mySubmitted
-            ? `marked done — edit until ${formatCountdown(msLeft)} left`
-            : "optional — you can still edit until the window ends"}
+            ? `marked done; edit until ${formatCountdown(msLeft)} left`
+            : "optional: you can still edit until the window ends"}
         </p>
       </div>
 
@@ -611,7 +611,7 @@ export function MemoryBuildPage() {
                   .filter((m) => !m.isViewer)
                   .map((m) => m.displayName),
               )}{" "}
-              you&apos;re finished — you can still edit until the 24h window
+              you&apos;re finished; you can still edit until the 24h window
               ends.
             </p>
             <div className="memory-sheet__actions">

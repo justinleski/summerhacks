@@ -1147,6 +1147,15 @@ html[data-theme="light"] .pixel-swatch--empty {
   width: 100%;
 }
 
+/* Match secondary CTA ink to login title (panel currentColor). */
+.login-form .secondary,
+.login-form .oauth.secondary {
+  width: 100%;
+  color: currentColor;
+  border-color: color-mix(in srgb, currentColor 22%, transparent);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
 .login-form .brand,
 .login-form .home-hero .brand {
   display: none;
@@ -3014,6 +3023,46 @@ html[data-theme="light"] .pixel-swatch--empty {
   display: grid;
   place-items: center;
   height: 100%;
+}
+
+.map-page__location-gate {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.85rem;
+  height: 100%;
+  padding: 2rem min(1.5rem, 4vw);
+  text-align: center;
+  max-width: 22rem;
+  margin: 0 auto;
+}
+
+.map-page__location-banner {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 500;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  max-width: min(28rem, calc(100% - 2rem));
+  padding: 0.75rem 1rem;
+  background: var(--glass-surface);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-glow);
+  text-align: center;
+}
+
+.map-page__location-banner p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text);
 }
 
 .map-page__empty {

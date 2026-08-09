@@ -16,11 +16,34 @@ import {
   meIcon,
 } from "./mapConfig";
 
-const DEFAULT_CENTER: [number, number] = [40.7128, -74.006];
+type LocStatus =
+  | "idle"
+  | "pending"
+  | "granted"
+  | "denied"
+  | "unavailable"
+  | "timeout"
+  | "unsupported";
+
+function locMessage(status: LocStatus): string {
+  switch (status) {
+    case "denied":
+      return "Location access was denied. Enable it in Settings, then try again.";
+    case "timeout":
+      return "Location timed out. Move somewhere with a clearer signal, then try again.";
+    case "unavailable":
+      return "Could not determine your location. Try again.";
+    case "unsupported":
+      return "This browser does not support location.";
+    default:
+      return "Beacon needs your location to place check-ins.";
+  }
+}
 
 export function MapPage() {
-  const [center, setCenter] = useState<[number, number] | null>(null);
-  const [locating, setLocating] = useState(true);
+  const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
+  const [locStatus, setLocStatus] = useState<LocStatus>("idle");
+  const [locating, setLocating] = useState(false);
   const [checkins, setCheckins] = useState<Checkin[]>([]);
   const [friendCheckins, setFriendCheckins] = useState<FriendCheckin[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -42,34 +65,68 @@ export function MapPage() {
     setCheckinsLoaded(true);
   }, []);
 
+  const requestLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      setMyLocation(null);
+      setLocStatus("unsupported");
+      setLocating(false);
+      return;
+    }
+
+    setLocating(true);
+    setLocStatus("pending");
+    setError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setMyLocation([pos.coords.latitude, pos.coords.longitude]);
+        setLocStatus("granted");
+        setLocating(false);
+      },
+      (err) => {
+        setMyLocation(null);
+        setLocating(false);
+        if (err.code === err.PERMISSION_DENIED) setLocStatus("denied");
+        else if (err.code === err.TIMEOUT) setLocStatus("timeout");
+        else setLocStatus("unavailable");
+      },
+      {
+        enableHighAccuracy: true,
+        // iOS Safari often needs longer than a short timeout before the sheet appears.
+        timeout: 20000,
+        maximumAge: 0,
+      },
+    );
+  }, []);
+
   useEffect(() => {
     loadCheckins().catch((err) =>
       setError(err instanceof Error ? err.message : "Failed to load check-ins"),
     );
   }, [loadCheckins]);
 
+  // Always attempt geolocation on open. Do not invent a city fallback.
   useEffect(() => {
-    if (!navigator.geolocation) {
-      setCenter(DEFAULT_CENTER);
-      setLocating(false);
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setCenter([pos.coords.latitude, pos.coords.longitude]);
-        setLocating(false);
-      },
-      () => {
-        setCenter(DEFAULT_CENTER);
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 8000 },
-    );
-  }, []);
+    requestLocation();
+  }, [requestLocation]);
+
+  const mapCenter: [number, number] | null =
+    myLocation ??
+    (checkins[0] ? [checkins[0].lat, checkins[0].lng] : null) ??
+    (friendCheckins[0]
+      ? [friendCheckins[0].lat, friendCheckins[0].lng]
+      : null);
+
+  const needsLocationGate =
+    locStatus !== "granted" && locStatus !== "pending" && locStatus !== "idle";
 
   async function submitCheckin(e: FormEvent) {
     e.preventDefault();
-    if (!center) return;
+    if (!myLocation) {
+      setError("Allow location before checking in.");
+      setShowModal(false);
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
@@ -92,8 +149,8 @@ export function MapPage() {
       await api("/checkins", {
         method: "POST",
         body: JSON.stringify({
-          lat: center[0],
-          lng: center[1],
+          lat: myLocation[0],
+          lng: myLocation[1],
           region: region.trim(),
           caption: caption.trim() || undefined,
           photoUrl,
@@ -123,7 +180,7 @@ export function MapPage() {
           <button
             type="button"
             className="primary"
-            disabled={!center}
+            disabled={!myLocation}
             onClick={() => setShowModal(true)}
           >
             Check in
@@ -137,90 +194,134 @@ export function MapPage() {
       {error && <p className="error map-page__error">{error}</p>}
 
       <div className="map-container">
-        {locating && !center ? (
-          <p className="muted map-page__loading">Finding your location…</p>
-        ) : center ? (
+        {locating && !mapCenter ? (
+          <div className="map-page__location-gate">
+            <p className="muted">Finding your location…</p>
+            <p className="member-meta">
+              If nothing appears, tap Allow when iOS asks for location.
+            </p>
+          </div>
+        ) : mapCenter ? (
           <>
             {checkinsLoaded &&
               checkins.length === 0 &&
-              friendCheckins.length === 0 && (
+              friendCheckins.length === 0 &&
+              myLocation && (
                 <p className="map-page__empty">
-                  No check-ins yet — tap Check in to drop the first pin.
+                  No check-ins yet; tap Check in to drop the first pin.
                 </p>
               )}
             <MapContainer
-              center={center}
+              center={mapCenter}
               zoom={13}
               scrollWheelZoom
               style={{ height: "100%", width: "100%" }}
             >
-            <TileLayer url={currentCartoTileUrl()} attribution={CARTO_ATTRIBUTION} />
-            <Marker position={center} icon={meIcon}>
-              <Popup>You are here</Popup>
-            </Marker>
-            {checkins.map((c) => (
-              <Marker key={c.id} position={[c.lat, c.lng]} icon={checkinIcon}>
-                <Popup>
-                  <strong>{c.region ?? "Somewhere"}</strong>
-                  {c.photoUrl && (
-                    <img
-                      src={c.photoUrl}
-                      alt=""
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        maxWidth: 200,
-                        borderRadius: 8,
-                        margin: "0.4rem 0",
-                      }}
-                    />
-                  )}
-                  {c.caption && <p style={{ margin: "0.2rem 0" }}>{c.caption}</p>}
-                  <span className="member-meta">
-                    {new Date(c.createdAt).toLocaleString()}
-                  </span>
-                </Popup>
-              </Marker>
-            ))}
-            {friendCheckins.map((c) => (
-              <Marker
-                key={c.id}
-                position={[c.lat, c.lng]}
-                icon={friendCheckinIcon}
-                zIndexOffset={1000}
-              >
-                <Popup>
-                  <strong>{c.region ?? "Somewhere"}</strong>
-                  <p className="member-meta" style={{ margin: "0.1rem 0" }}>
-                    {c.ownerDisplayName}
-                  </p>
-                  {c.photoUrl && (
-                    <img
-                      src={c.photoUrl}
-                      alt=""
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        maxWidth: 200,
-                        borderRadius: 8,
-                        margin: "0.4rem 0",
-                      }}
-                    />
-                  )}
-                  {c.caption && <p style={{ margin: "0.2rem 0" }}>{c.caption}</p>}
-                  <span className="member-meta">
-                    {new Date(c.createdAt).toLocaleString()}
-                  </span>
-                </Popup>
-              </Marker>
-            ))}
+              <TileLayer
+                url={currentCartoTileUrl()}
+                attribution={CARTO_ATTRIBUTION}
+              />
+              {myLocation && (
+                <Marker position={myLocation} icon={meIcon}>
+                  <Popup>You are here</Popup>
+                </Marker>
+              )}
+              {checkins.map((c) => (
+                <Marker key={c.id} position={[c.lat, c.lng]} icon={checkinIcon}>
+                  <Popup>
+                    <strong>{c.region ?? "Somewhere"}</strong>
+                    {c.photoUrl && (
+                      <img
+                        src={c.photoUrl}
+                        alt=""
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          maxWidth: 200,
+                          borderRadius: 8,
+                          margin: "0.4rem 0",
+                        }}
+                      />
+                    )}
+                    {c.caption && (
+                      <p style={{ margin: "0.2rem 0" }}>{c.caption}</p>
+                    )}
+                    <span className="member-meta">
+                      {new Date(c.createdAt).toLocaleString()}
+                    </span>
+                  </Popup>
+                </Marker>
+              ))}
+              {friendCheckins.map((c) => (
+                <Marker
+                  key={c.id}
+                  position={[c.lat, c.lng]}
+                  icon={friendCheckinIcon}
+                  zIndexOffset={1000}
+                >
+                  <Popup>
+                    <strong>{c.region ?? "Somewhere"}</strong>
+                    <p className="member-meta" style={{ margin: "0.1rem 0" }}>
+                      {c.ownerDisplayName}
+                    </p>
+                    {c.photoUrl && (
+                      <img
+                        src={c.photoUrl}
+                        alt=""
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          maxWidth: 200,
+                          borderRadius: 8,
+                          margin: "0.4rem 0",
+                        }}
+                      />
+                    )}
+                    {c.caption && (
+                      <p style={{ margin: "0.2rem 0" }}>{c.caption}</p>
+                    )}
+                    <span className="member-meta">
+                      {new Date(c.createdAt).toLocaleString()}
+                    </span>
+                  </Popup>
+                </Marker>
+              ))}
             </MapContainer>
           </>
-        ) : null}
+        ) : (
+          <div className="map-page__location-gate">
+            <p>{locMessage(locStatus === "idle" ? "unavailable" : locStatus)}</p>
+            <button
+              type="button"
+              className="primary"
+              disabled={locating}
+              onClick={() => requestLocation()}
+            >
+              {locating ? "Asking…" : "Allow location"}
+            </button>
+          </div>
+        )}
+
+        {needsLocationGate && mapCenter && (
+          <div className="map-page__location-banner">
+            <p>{locMessage(locStatus)}</p>
+            <button
+              type="button"
+              className="primary"
+              disabled={locating}
+              onClick={() => requestLocation()}
+            >
+              {locating ? "Asking…" : "Allow location"}
+            </button>
+          </div>
+        )}
       </div>
 
       {showModal && (
-        <div className="checkin-modal-overlay" onClick={() => setShowModal(false)}>
+        <div
+          className="checkin-modal-overlay"
+          onClick={() => setShowModal(false)}
+        >
           <div className="checkin-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Check in here</h2>
             <form className="stack-form" onSubmit={submitCheckin}>
@@ -267,7 +368,7 @@ export function MapPage() {
                 <button
                   type="submit"
                   className="primary"
-                  disabled={busy || !region.trim()}
+                  disabled={busy || !region.trim() || !myLocation}
                 >
                   {busy ? "Checking in…" : "Check in"}
                 </button>

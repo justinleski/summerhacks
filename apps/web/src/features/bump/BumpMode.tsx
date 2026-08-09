@@ -235,7 +235,7 @@ export function BumpMode({ onClose }: { onClose: () => void }) {
             <>
               <h1>Listening</h1>
               <p>
-                Shake harder — intensity {Math.round(intensity * 100)}%
+                Shake harder: intensity {Math.round(intensity * 100)}%
                 {vibrateSupported
                   ? " · haptics on"
                   : " · visual only on this device"}
@@ -259,7 +259,7 @@ export function BumpMode({ onClose }: { onClose: () => void }) {
               <h1>Was this you?</h1>
               <p>
                 Auto-match missed. Tap an anonymous nearby avatar if you see
-                who you meant to bump — or try again.
+                who you meant to bump, or try again.
               </p>
               {fallback.candidates.length > 0 ? (
                 <div className="bump-candidate-grid" role="list">

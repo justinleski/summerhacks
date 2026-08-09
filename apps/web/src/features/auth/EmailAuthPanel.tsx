@@ -101,7 +101,7 @@ export function EmailAuthPanel({
         await neonSignInEmail({ email: trimmedEmail, password });
         if (await finishAfterCredentials({ needsName: false })) return;
         setInfo(
-          "Account found — enter the verification code from your email if prompted.",
+          "Account found: enter the verification code from your email if prompted.",
         );
         setMode("verify");
         return;
@@ -147,7 +147,7 @@ export function EmailAuthPanel({
     setBusy(true);
     try {
       await neonResendVerificationOtp(email.trim());
-      setInfo("New code sent — check your inbox.");
+      setInfo("New code sent; check your inbox.");
     } catch (err) {
       onError(err instanceof Error ? err.message : "Could not resend code");
     } finally {

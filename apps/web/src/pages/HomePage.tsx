@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import type { BootstrapResponse, Session } from "@summerhacks/shared";
+import type { Session } from "@summerhacks/shared";
 import { Toast } from "../components/Toast";
 import {
   EmailAuthPanel,
@@ -19,7 +19,6 @@ import {
   api,
   clearAuth,
   getAuthMode,
-  getDeviceId,
   getDisplayName,
   getNeedsName,
   getToken,
@@ -86,7 +85,7 @@ export function HomePage() {
   const enterFromNeonSession = useCallback(async (opts: { needsName: boolean }) => {
     const session = await getNeonSession();
     if (!session) {
-      throw new Error("Signed in, but no session JWT yet — try again");
+      throw new Error("Signed in, but no session JWT yet; try again");
     }
     const display =
       session.user.name?.trim() ||
@@ -208,29 +207,6 @@ export function HomePage() {
       setError(err instanceof Error ? err.message : "Failed to load sessions"),
     );
   }, [phase]);
-
-  async function continueAsGuest() {
-    setError(null);
-    setAuthBusy(true);
-    try {
-      const res = await api<BootstrapResponse>("/users/bootstrap", {
-        method: "POST",
-        body: JSON.stringify({
-          displayName: "Guest",
-          deviceId: getDeviceId(),
-        }),
-      });
-      setAuth(res.token, res.user.displayName, "guest");
-      setName(res.user.displayName);
-      setNeedsName(true);
-      setNameDraft("");
-      setPhase("name");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Bootstrap failed");
-    } finally {
-      setAuthBusy(false);
-    }
-  }
 
   async function saveDisplayName(e: FormEvent) {
     e.preventDefault();
@@ -380,11 +356,11 @@ export function HomePage() {
   if (phase !== "app") {
     return (
       <LoginChrome
-        title="Bump to connect"
-        subtitle="Shake together to open a shared session — no GPS prompt, reopen anytime."
+        title="beacon"
+        subtitle="Shake together to open a shared session: no GPS prompt, reopen anytime."
       >
         <div className="oauth-stack">
-          {neonAuthEnabled && (
+          {neonAuthEnabled ? (
             <>
               <button
                 type="button"
@@ -405,19 +381,10 @@ export function HomePage() {
               >
                 Continue with email
               </button>
-              <div className="divider">
-                <span>or</span>
-              </div>
             </>
+          ) : (
+            <p className="oauth-note">Sign-in is unavailable right now.</p>
           )}
-          <button
-            type="button"
-            className={neonAuthEnabled ? "secondary oauth" : "primary oauth"}
-            disabled={authBusy}
-            onClick={() => void continueAsGuest()}
-          >
-            Continue as guest
-          </button>
         </div>
         {error && <p className="error">{error}</p>}
         <Toast message={toast} onDone={clearToast} />
@@ -434,7 +401,7 @@ export function HomePage() {
     <main className="page home">
       <header className="home-header">
         <div>
-          <p className="brand">Summerhacks</p>
+          <p className="brand">Beacon</p>
           <h1>Hey, {name}</h1>
         </div>
         <div className="home-actions">

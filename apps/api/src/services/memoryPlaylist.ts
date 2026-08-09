@@ -38,7 +38,7 @@ export async function exportMemoryPlaylist(
   const otherNames = memory.members
     .filter((m) => !m.isViewer)
     .map((m) => m.displayName);
-  const name = `hangout w/ ${otherNames.join(", ")} — ${monthDay(memory.hangoutAt)}`;
+  const name = `hangout w/ ${otherNames.join(", ")}: ${monthDay(memory.hangoutAt)}`;
 
   const { playlistId, playlistUrl } = await createPlaylistWithTracks({
     userId,
