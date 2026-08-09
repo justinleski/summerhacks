@@ -1,6 +1,6 @@
 # Summerhacks
 
-Photo-sharing experiment with **Bump**, **Friends**, **Calendar**, and **Profile**.
+Photo-sharing experiment with **Bump**, **Album** (per-person covers + vote/spin), **Friends**, **Calendar**, and **Profile**.
 
 ## Monorepo
 
@@ -48,7 +48,9 @@ If `db:push` fails through the pooler, temporarily use the unpooled URL:
 DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:push -w @summerhacks/api
 ```
 
-Optional for event/avatar images: set `BLOB_READ_WRITE_TOKEN` (Vercel Blob). Without it, events and profile still work; image upload routes return 503.
+Optional for event/avatar/album-cover images: set `BLOB_READ_WRITE_TOKEN` (Vercel Blob). Without it, events and profile still work; image upload routes return 503.
+
+Album covers are per member (draw → ready → vote or spin). See [.context/features/album/BRIEFING.md](.context/features/album/BRIEFING.md).
 
 `.env` / `.env.local` are gitignored. `.env.example` stays in git (placeholders only).
 
@@ -80,7 +82,7 @@ Full map: [docs/deploy-vercel.md](docs/deploy-vercel.md).
 - [Matching + haptics](docs/bump/matching.md)
 - [Architecture](docs/bump/architecture.md)
 - [API](docs/bump/api.md) · [Data model](docs/bump/data-model.md)
-- [Neon Auth (Google / GitHub)](docs/auth-neon.md)
+- [Neon Auth (Google / GitHub / Email OTP)](docs/auth-neon.md)
 - [Vercel + Neon (two-device demos)](docs/deploy-vercel.md)
 - [Docs index](docs/README.md)
 - [Agent briefing](.context/features/bump/BRIEFING.md) · [spec](.context/features/bump/spec.yaml)

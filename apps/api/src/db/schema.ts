@@ -1,5 +1,6 @@
 import {
   doublePrecision,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
@@ -8,7 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import type { SessionPayload } from "@summerhacks/shared";
+import type { PixelGridSize, SessionPayload } from "@summerhacks/shared";
 import { sql } from "drizzle-orm";
 
 export const users = pgTable(
@@ -64,6 +65,60 @@ export const sessionMembers = pgTable(
   (t) => [primaryKey({ columns: [t.sessionId, t.userId] })],
 );
 
+/** One pixel cover per session member. Winner chosen by vote or spin. */
+export const albums = pgTable(
+  "albums",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title"),
+    gridSize: integer("grid_size").$type<PixelGridSize>().notNull().default(16),
+    pixels: jsonb("pixels").$type<(string | null)[]>().notNull().default([]),
+    coverUrl: text("cover_url"),
+    editableUntil: timestamp("editable_until", { withTimezone: true }).notNull(),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("albums_session_user_idx").on(t.sessionId, t.userId)],
+);
+
+export const albumContests = pgTable("album_contests", {
+  sessionId: uuid("session_id")
+    .primaryKey()
+    .references(() => sessions.id, { onDelete: "cascade" }),
+  winnerUserId: uuid("winner_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  method: text("method"),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
+
+export const albumVotes = pgTable(
+  "album_votes",
+  {
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    voterUserId: uuid("voter_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    choiceUserId: uuid("choice_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (t) => [primaryKey({ columns: [t.sessionId, t.voterUserId] })],
+);
+
 export const bumpIntents = pgTable(
   "bump_intents",
   {
@@ -96,6 +151,29 @@ export const bumpIntents = pgTable(
     ),
   ],
 );
+
+/** Ephemeral "was this you?" proposes after auto-match expires. */
+export const bumpProposals = pgTable("bump_proposals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  fromBumpId: uuid("from_bump_id")
+    .notNull()
+    .references(() => bumpIntents.id, { onDelete: "cascade" }),
+  toBumpId: uuid("to_bump_id")
+    .notNull()
+    .references(() => bumpIntents.id, { onDelete: "cascade" }),
+  fromUserId: uuid("from_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  toUserId: uuid("to_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"),
+  sessionId: uuid("session_id").references(() => sessions.id),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
 
 export const friendRequests = pgTable(
   "friend_requests",

@@ -15,6 +15,7 @@ Machine-oriented feature specs for AI agents. Prefer these over scanning the who
 | Feature | Spec | Flattened briefing | Human docs |
 | --- | --- | --- | --- |
 | Bump | [features/bump/spec.yaml](features/bump/spec.yaml) | [features/bump/BRIEFING.md](features/bump/BRIEFING.md) | [docs/bump/overview.md](../docs/bump/overview.md) |
+| Album | [features/album/spec.yaml](features/album/spec.yaml) | [features/album/BRIEFING.md](features/album/BRIEFING.md) | [docs/album/overview.md](../docs/album/overview.md) |
 | Friends | [features/friends/spec.yaml](features/friends/spec.yaml) | [features/friends/BRIEFING.md](features/friends/BRIEFING.md) | [docs/friends/overview.md](../docs/friends/overview.md) |
 | Calendar | [features/calendar/spec.yaml](features/calendar/spec.yaml) | [features/calendar/BRIEFING.md](features/calendar/BRIEFING.md) | [docs/calendar/overview.md](../docs/calendar/overview.md) |
 | Profile | [features/profile/spec.yaml](features/profile/spec.yaml) | [features/profile/BRIEFING.md](features/profile/BRIEFING.md) | [docs/profile/overview.md](../docs/profile/overview.md) |
@@ -22,13 +23,15 @@ Machine-oriented feature specs for AI agents. Prefer these over scanning the who
 ## One-line models
 
 - **Bump:** Gesture on client; match + session on server (Neon). Time ±2s + IP geo.
+- **Album:** Per-member covers on a bump session; vote or spin; Neon durable pixels; 24h edit window.
 - **Friends:** Friend code → inbox Accept/Reject; follow = friendship.
 - **Calendar:** Friends-only events + FOAF attendance; activity fan-out; optional Blob images.
-- **Profile:** Bio + avatar (Blob) + client theme + logout.
+- **Profile:** Bio + pixel avatar (Blob) + client theme + logout.
 
 ## Local vs Preview DB (agents)
 
 - Unset `DATABASE_URL` → memory store (local OK)
 - Set `DATABASE_URL` on Vercel Preview/Prod → Neon
-- Image/avatar uploads need `BLOB_READ_WRITE_TOKEN`
+- Image/avatar/album-cover uploads need `BLOB_READ_WRITE_TOKEN`
+- Album covers: per-member draw → ready → vote/spin (see `.context/features/album/`)
 - Never commit `.env` / `.vercel/`; use `.env.example` as the template

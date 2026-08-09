@@ -1,11 +1,14 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { BootstrapResponse, Session } from "@summerhacks/shared";
+import { Toast } from "../components/Toast";
+import { EmailAuthPanel } from "../features/auth/EmailAuthPanel";
 import { BumpMode } from "../features/bump/BumpMode";
 import { RecentSessions } from "../features/session/RecentSessions";
 import {
   api,
   clearAuth,
+  getAuthMode,
   getDeviceId,
   getDisplayName,
   getToken,
@@ -13,24 +16,47 @@ import {
 } from "../lib/api";
 import {
   authClient,
-  getNeonAccessToken,
-  getNeonSessionUser,
+  getNeonSession,
   neonAuthEnabled,
 } from "../lib/neonAuth";
 
 export function HomePage() {
-  const [ready, setReady] = useState(Boolean(getToken()));
+  const existingToken = getToken();
+  const existingMode = getAuthMode();
+  // Guest tokens are UUIDs; Neon JWTs are three-segment. Don't treat a stale
+  // opaque/missing JWT as signed-in before hydrate runs.
+  const [ready, setReady] = useState(
+    Boolean(existingToken) && existingMode === "guest",
+  );
   const [name, setName] = useState(getDisplayName() || "");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [bumpOpen, setBumpOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [booting, setBooting] = useState(neonAuthEnabled);
+  const clearToast = useCallback(() => setToast(null), []);
 
   async function loadSessions() {
     const res = await api<{ sessions: Session[] }>("/sessions");
     setSessions(res.sessions);
   }
+
+  const enterFromNeonSession = useCallback(async () => {
+    const session = await getNeonSession();
+    if (!session) {
+      throw new Error("Signed in, but no session JWT yet — try again");
+    }
+    const display =
+      session.user.name?.trim() ||
+      session.user.email?.split("@")[0] ||
+      "User";
+    setAuth(session.jwt, display, "neon");
+    setName(display);
+    await api("/users/sync", { method: "POST" });
+    setReady(true);
+    setToast(`Welcome, ${display}`);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,25 +66,24 @@ export function HomePage() {
         return;
       }
       try {
-        const user = await getNeonSessionUser();
-        if (cancelled) return;
-        if (user) {
-          const jwt = await getNeonAccessToken();
-          if (!jwt) {
-            setBooting(false);
-            return;
-          }
-          const display =
-            user.name?.trim() ||
-            user.email?.split("@")[0] ||
-            "User";
-          setAuth(jwt, display, "neon");
-          setName(display);
-          await api("/users/sync", { method: "POST" });
-          if (!cancelled) setReady(true);
+        const session = await getNeonSession();
+        if (cancelled || !session) return;
+        const display =
+          session.user.name?.trim() ||
+          session.user.email?.split("@")[0] ||
+          "User";
+        setAuth(session.jwt, display, "neon");
+        setName(display);
+        await api("/users/sync", { method: "POST" });
+        if (!cancelled) {
+          setReady(true);
+          setToast(`Welcome, ${display}`);
         }
       } catch (err) {
         if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Sign-in restore failed",
+          );
           console.warn(err);
         }
       } finally {
@@ -92,6 +117,7 @@ export function HomePage() {
       setAuth(res.token, res.user.displayName, "guest");
       setName(res.user.displayName);
       setReady(true);
+      setToast(`Welcome, ${res.user.displayName}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bootstrap failed");
     }
@@ -179,9 +205,18 @@ export function HomePage() {
               Continue with GitHub
             </button>
             <p className="muted oauth-note">
-              GitHub needs OAuth credentials in the Neon Console (Google works
-              with shared credentials for testing).
+              GitHub needs OAuth credentials in the Neon Console. Email codes are
+              sent by Neon Auth (~15 min expiry).
             </p>
+            <div className="divider">
+              <span>or email</span>
+            </div>
+            <EmailAuthPanel
+              busy={authBusy}
+              setBusy={setAuthBusy}
+              onError={setError}
+              onAuthenticated={enterFromNeonSession}
+            />
             <div className="divider">
               <span>or guest</span>
             </div>
@@ -198,11 +233,12 @@ export function HomePage() {
               autoComplete="nickname"
             />
           </label>
-          <button type="submit" className="primary">
+          <button type="submit" className="primary" disabled={authBusy}>
             Continue as guest
           </button>
         </form>
         {error && <p className="error">{error}</p>}
+        <Toast message={toast} onDone={clearToast} />
       </main>
     );
   }
@@ -232,6 +268,7 @@ export function HomePage() {
 
       {error && <p className="error">{error}</p>}
       <RecentSessions sessions={sessions} />
+      <Toast message={toast} onDone={clearToast} />
     </main>
   );
 }

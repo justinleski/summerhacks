@@ -34,6 +34,19 @@ Postgres on Neon (or in-memory mirror of the same shapes). Relations are first-c
 | session_id | uuid nullable | Set on match |
 | expires_at | timestamptz | ~8s after create |
 
+### `bump_proposals` (ephemeral)
+
+Short-lived "was this you?" proposes after auto-match expires. TTL ≈ `BUMP_CANDIDATE_WINDOW_MS` (45s).
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | uuid PK | |
+| from_bump_id / to_bump_id | uuid FK | Intent pair |
+| from_user_id / to_user_id | uuid FK | |
+| status | text | `pending` \| `accepted` \| `rejected` \| `expired` |
+| session_id | uuid nullable | Set on accept |
+| created_at / expires_at | timestamptz | |
+
 ### `sessions` (durable)
 
 | Column | Type | Notes |
@@ -70,6 +83,10 @@ Postgres on Neon (or in-memory mirror of the same shapes). Relations are first-c
 | confirmed_at | timestamptz nullable | Null until `POST .../confirm` |
 
 Primary key `(session_id, user_id)`. Session becomes `active` when every member has `confirmed_at`.
+
+### `albums` (joint cover)
+
+1:1 with `sessions`. Durable pixel grid + optional Blob cover. See [album/data-model.md](../album/data-model.md).
 
 ## Lifetimes
 

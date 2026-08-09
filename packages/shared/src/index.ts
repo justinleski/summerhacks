@@ -3,6 +3,12 @@ import { z } from "zod";
 export const MATCH_TIME_WINDOW_MS = 2000;
 export const BUMP_EXPIRY_MS = 8000;
 export const BUMP_POLL_INTERVAL_MS = 500;
+/**
+ * After auto-match expires, candidates are other recent same-place bump intents
+ * created within this window (45s — within the 30–60s product range).
+ * Proposal TTL uses the same constant.
+ */
+export const BUMP_CANDIDATE_WINDOW_MS = 45_000;
 
 export const bumpStatusSchema = z.enum(["pending", "matched", "expired"]);
 export type BumpStatus = z.infer<typeof bumpStatusSchema>;
@@ -79,6 +85,63 @@ export const bumpResponseSchema = z.object({
   peer: peerSummarySchema.nullable().optional(),
 });
 export type BumpResponse = z.infer<typeof bumpResponseSchema>;
+
+/** Anonymous candidate for post-expiry "was this you?" picker — no displayName. */
+export const bumpCandidateSchema = z.object({
+  bumpId: z.string().uuid(),
+  userId: z.string().uuid(),
+  avatarUrl: z.string().url().nullable(),
+});
+export type BumpCandidate = z.infer<typeof bumpCandidateSchema>;
+
+export const bumpCandidatesResponseSchema = z.object({
+  candidates: z.array(bumpCandidateSchema),
+});
+export type BumpCandidatesResponse = z.infer<typeof bumpCandidatesResponseSchema>;
+
+export const proposeBumpBodySchema = z.object({
+  targetBumpId: z.string().uuid(),
+});
+export type ProposeBumpBody = z.infer<typeof proposeBumpBodySchema>;
+
+export const bumpProposalStatusSchema = z.enum([
+  "pending",
+  "accepted",
+  "rejected",
+  "expired",
+]);
+export type BumpProposalStatus = z.infer<typeof bumpProposalStatusSchema>;
+
+export const bumpProposalSchema = z.object({
+  id: z.string().uuid(),
+  fromBumpId: z.string().uuid(),
+  toBumpId: z.string().uuid(),
+  fromUserId: z.string().uuid(),
+  toUserId: z.string().uuid(),
+  status: bumpProposalStatusSchema,
+  sessionId: z.string().uuid().nullable(),
+  expiresAt: z.string().datetime(),
+  createdAt: z.string().datetime(),
+  /** Proposer avatar for incoming prompt — no displayName required. */
+  fromAvatarUrl: z.string().url().nullable().optional(),
+});
+export type BumpProposal = z.infer<typeof bumpProposalSchema>;
+
+export const bumpProposalsResponseSchema = z.object({
+  proposals: z.array(bumpProposalSchema),
+});
+export type BumpProposalsResponse = z.infer<typeof bumpProposalsResponseSchema>;
+
+export const acceptBumpProposalResponseSchema = z.object({
+  proposalId: z.string().uuid(),
+  status: z.literal("accepted"),
+  sessionId: z.string().uuid(),
+  bumpId: z.string().uuid(),
+  peer: peerSummarySchema,
+});
+export type AcceptBumpProposalResponse = z.infer<
+  typeof acceptBumpProposalResponseSchema
+>;
 
 export const sessionMemberSchema = z.object({
   userId: z.string().uuid(),
@@ -255,3 +318,96 @@ export const uploadEventImageResponseSchema = z.object({
 export type UploadEventImageResponse = z.infer<
   typeof uploadEventImageResponseSchema
 >;
+
+// --- Session album covers (one per member) + vote / spin ---
+
+/** Default cover edit window after bump session create. Override with ALBUM_EDIT_WINDOW_MS. */
+export const ALBUM_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const COVER_CONTEST_POLL_MS = 1500;
+export const PIXEL_GRID_SIZES = [16, 32] as const;
+export type PixelGridSize = (typeof PIXEL_GRID_SIZES)[number];
+export const DEFAULT_PIXEL_GRID_SIZE: PixelGridSize = 16;
+
+export const pixelGridSizeSchema = z.union([z.literal(16), z.literal(32)]);
+
+export const pixelCellSchema = z.string().nullable();
+
+export function emptyPixelGrid(size: PixelGridSize): (string | null)[] {
+  return Array.from({ length: size * size }, () => null);
+}
+
+export function albumPixelsSchema(size: PixelGridSize) {
+  return z.array(pixelCellSchema).length(size * size);
+}
+
+/** @deprecated Prefer albumCoverSchema — kept as alias during migrate. */
+export const albumSchema = z.object({
+  id: z.string().uuid(),
+  sessionId: z.string().uuid(),
+  userId: z.string().uuid(),
+  displayName: z.string(),
+  title: z.string().nullable(),
+  gridSize: pixelGridSizeSchema,
+  pixels: z.array(pixelCellSchema),
+  coverUrl: z.string().url().nullable(),
+  editableUntil: z.string().datetime(),
+  readyAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  editable: z.boolean(),
+});
+export type Album = z.infer<typeof albumSchema>;
+export const albumCoverSchema = albumSchema;
+export type AlbumCover = Album;
+
+export const coverContestPhaseSchema = z.enum([
+  "editing",
+  "voting",
+  "resolved",
+]);
+export type CoverContestPhase = z.infer<typeof coverContestPhaseSchema>;
+
+export const coverVoteSchema = z.object({
+  voterUserId: z.string().uuid(),
+  choiceUserId: z.string().uuid().nullable(),
+});
+export type CoverVote = z.infer<typeof coverVoteSchema>;
+
+export const coverContestSchema = z.object({
+  phase: coverContestPhaseSchema,
+  votes: z.array(coverVoteSchema),
+  winnerUserId: z.string().uuid().nullable(),
+  method: z.enum(["vote", "spin"]).nullable(),
+  resolvedAt: z.string().datetime().nullable(),
+});
+export type CoverContest = z.infer<typeof coverContestSchema>;
+
+export const sessionCoversResponseSchema = z.object({
+  covers: z.array(albumCoverSchema),
+  contest: coverContestSchema,
+  mine: albumCoverSchema.nullable(),
+});
+export type SessionCoversResponse = z.infer<typeof sessionCoversResponseSchema>;
+
+export const updateAlbumBodySchema = z
+  .object({
+    pixels: z.array(pixelCellSchema).optional(),
+    coverUrl: z.string().url().nullable().optional(),
+    gridSize: pixelGridSizeSchema.optional(),
+    title: z.string().max(64).nullable().optional(),
+  })
+  .refine(
+    (v) =>
+      v.pixels !== undefined ||
+      v.coverUrl !== undefined ||
+      v.gridSize !== undefined ||
+      v.title !== undefined,
+    { message: "At least one field is required" },
+  );
+export type UpdateAlbumBody = z.infer<typeof updateAlbumBodySchema>;
+
+export const coverVoteBodySchema = z.object({
+  /** Cover author to vote for, or null to abstain / “surprise me”. */
+  choiceUserId: z.string().uuid().nullable(),
+});
+export type CoverVoteBody = z.infer<typeof coverVoteBodySchema>;

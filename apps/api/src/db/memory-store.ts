@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
+  BUMP_CANDIDATE_WINDOW_MS,
   MATCH_TIME_WINDOW_MS,
+  emptyPixelGrid,
   type ActivityNotification,
+  type BumpCandidate,
+  type BumpProposal,
   type CalendarEvent,
   type EventComment,
   type EventDetail,
@@ -15,14 +19,19 @@ import type {
   CreateBumpInput,
   CreateEventInput,
   InboxFriendRequest,
+  StoredAlbum,
+  StoredAlbumContest,
+  StoredAlbumVote,
   StoredBumpIntent,
+  StoredBumpProposal,
   StoredFriendRequest,
   StoredSession,
   StoredSessionMember,
   StoredUser,
   Store,
+  UpdateAlbumInput,
 } from "./types.js";
-import { orderedFriendshipPair, toIso } from "./types.js";
+import { freshAlbumForMember, orderedFriendshipPair, toIso } from "./types.js";
 
 function placesMatch(a: StoredBumpIntent, b: StoredBumpIntent): boolean {
   if (a.geoCountry && b.geoCountry && a.geoCountry === b.geoCountry) {
@@ -48,6 +57,12 @@ function withinTimeWindow(a: StoredBumpIntent, b: StoredBumpIntent): boolean {
     Math.abs(a.serverTimestamp.getTime() - b.serverTimestamp.getTime()) <=
     MATCH_TIME_WINDOW_MS
   );
+}
+
+function storeError(message: string, status: number): Error {
+  const err = new Error(message);
+  (err as Error & { status: number }).status = status;
+  return err;
 }
 
 function buildSessionView(
@@ -131,8 +146,12 @@ export function createMemoryStore(): Store {
   const usersByFriendCode = new Map<string, string>();
   const bumps = new Map<string, StoredBumpIntent>();
   const bumpsByIdempotency = new Map<string, string>();
+  const bumpProposals = new Map<string, StoredBumpProposal>();
   const sessions = new Map<string, StoredSession>();
   const membersBySession = new Map<string, StoredSessionMember[]>();
+  const albumsByKey = new Map<string, StoredAlbum>();
+  const albumContests = new Map<string, StoredAlbumContest>();
+  const albumVotes = new Map<string, StoredAlbumVote>();
   const friendRequests = new Map<string, StoredFriendRequest>();
   const friendships = new Set<string>();
   const events = new Map<string, StoredEvent>();
@@ -297,6 +316,96 @@ export function createMemoryStore(): Store {
     return bump;
   }
 
+  function expireProposalIfNeeded(
+    proposal: StoredBumpProposal,
+  ): StoredBumpProposal {
+    if (
+      proposal.status === "pending" &&
+      proposal.expiresAt.getTime() <= Date.now()
+    ) {
+      const expired = { ...proposal, status: "expired" as const };
+      bumpProposals.set(proposal.id, expired);
+      return expired;
+    }
+    return proposal;
+  }
+
+  function pairBumps(
+    bump: StoredBumpIntent,
+    partner: StoredBumpIntent,
+  ): {
+    bump: StoredBumpIntent;
+    peer: StoredUser;
+    session: Session;
+  } {
+    const now = new Date();
+    const userA = users.get(bump.userId)!;
+    const userB = users.get(partner.userId)!;
+    const payload: SessionPayload = {
+      profiles: [
+        {
+          userId: userA.id,
+          displayName: userA.displayName,
+          avatarUrl: userA.avatarUrl,
+          photoUrls: [],
+        },
+        {
+          userId: userB.id,
+          displayName: userB.displayName,
+          avatarUrl: userB.avatarUrl,
+          photoUrls: [],
+        },
+      ],
+      notes: "Connected via bump",
+    };
+
+    const session: StoredSession = {
+      id: randomUUID(),
+      createdVia: "bump",
+      status: "pending_confirm",
+      payload,
+      createdAt: now,
+    };
+    sessions.set(session.id, session);
+
+    const members: StoredSessionMember[] = [
+      {
+        sessionId: session.id,
+        userId: userA.id,
+        joinedAt: now,
+        confirmedAt: null,
+      },
+      {
+        sessionId: session.id,
+        userId: userB.id,
+        joinedAt: now,
+        confirmedAt: null,
+      },
+    ];
+    membersBySession.set(session.id, members);
+
+    const matchedA: StoredBumpIntent = {
+      ...bump,
+      status: "matched",
+      matchedBumpId: partner.id,
+      sessionId: session.id,
+    };
+    const matchedB: StoredBumpIntent = {
+      ...partner,
+      status: "matched",
+      matchedBumpId: bump.id,
+      sessionId: session.id,
+    };
+    bumps.set(matchedA.id, matchedA);
+    bumps.set(matchedB.id, matchedB);
+
+    return {
+      bump: matchedA,
+      peer: userB,
+      session: buildSessionView(session, members, users),
+    };
+  }
+
   return {
     async bootstrapUser({ displayName, deviceId }) {
       if (deviceId && usersByDevice.has(deviceId)) {
@@ -458,72 +567,208 @@ export function createMemoryStore(): Store {
         return { bump, peer: null, session: null };
       }
 
+      const paired = pairBumps(bump, partner);
+      return {
+        bump: paired.bump,
+        peer: paired.peer,
+        session: paired.session,
+      };
+    },
+
+    async listBumpCandidates(bumpId) {
+      let bump = bumps.get(bumpId);
+      if (!bump) return [];
+      bump = expireIfNeeded(bump);
+      if (bump.status === "matched") return [];
+
+      const cutoff = Date.now() - BUMP_CANDIDATE_WINDOW_MS;
+      const byUser = new Map<string, { bump: StoredBumpIntent; user: StoredUser }>();
+
+      for (const other of bumps.values()) {
+        const o = expireIfNeeded(other);
+        if (o.id === bump.id) continue;
+        if (o.userId === bump.userId) continue;
+        if (o.status === "matched") continue;
+        if (o.serverTimestamp.getTime() < cutoff) continue;
+        if (!placesMatch(bump, o)) continue;
+        const user = users.get(o.userId);
+        if (!user) continue;
+        const prev = byUser.get(o.userId);
+        if (
+          !prev ||
+          o.serverTimestamp.getTime() > prev.bump.serverTimestamp.getTime()
+        ) {
+          byUser.set(o.userId, { bump: o, user });
+        }
+      }
+
+      const candidates: BumpCandidate[] = [...byUser.values()]
+        .sort(
+          (a, b) =>
+            b.bump.serverTimestamp.getTime() - a.bump.serverTimestamp.getTime(),
+        )
+        .map(({ bump: b, user }) => ({
+          bumpId: b.id,
+          userId: user.id,
+          avatarUrl: user.avatarUrl,
+        }));
+      return candidates;
+    },
+
+    async createBumpProposal(fromBumpId, targetBumpId, fromUserId) {
+      let fromBump = bumps.get(fromBumpId);
+      if (!fromBump || fromBump.userId !== fromUserId) {
+        throw storeError("Bump not found", 404);
+      }
+      fromBump = expireIfNeeded(fromBump);
+      if (fromBump.status === "matched") {
+        throw storeError("Bump already matched", 409);
+      }
+
+      let target = bumps.get(targetBumpId);
+      if (!target) throw storeError("Target bump not found", 404);
+      target = expireIfNeeded(target);
+      if (target.userId === fromUserId) {
+        throw storeError("Cannot propose to yourself", 400);
+      }
+      if (target.status === "matched") {
+        throw storeError("Target already matched", 409);
+      }
+
+      const cutoff = Date.now() - BUMP_CANDIDATE_WINDOW_MS;
+      if (target.serverTimestamp.getTime() < cutoff) {
+        throw storeError("Target bump too old", 410);
+      }
+      if (!placesMatch(fromBump, target)) {
+        throw storeError("Target not in same place", 400);
+      }
+
+      for (const p of bumpProposals.values()) {
+        const cur = expireProposalIfNeeded(p);
+        if (
+          cur.status === "pending" &&
+          cur.fromBumpId === fromBumpId &&
+          cur.toBumpId === targetBumpId
+        ) {
+          return cur;
+        }
+      }
+
       const now = new Date();
-      const userA = users.get(bump.userId)!;
-      const userB = users.get(partner.userId)!;
-      const payload: SessionPayload = {
-        profiles: [
-          {
-            userId: userA.id,
-            displayName: userA.displayName,
-            avatarUrl: userA.avatarUrl,
-            photoUrls: [],
-          },
-          {
-            userId: userB.id,
-            displayName: userB.displayName,
-            avatarUrl: userB.avatarUrl,
-            photoUrls: [],
-          },
-        ],
-        notes: "Connected via bump",
-      };
-
-      const session: StoredSession = {
+      const proposal: StoredBumpProposal = {
         id: randomUUID(),
-        createdVia: "bump",
-        status: "pending_confirm",
-        payload,
+        fromBumpId,
+        toBumpId: targetBumpId,
+        fromUserId,
+        toUserId: target.userId,
+        status: "pending",
+        sessionId: null,
         createdAt: now,
+        expiresAt: new Date(now.getTime() + BUMP_CANDIDATE_WINDOW_MS),
       };
-      sessions.set(session.id, session);
+      bumpProposals.set(proposal.id, proposal);
+      return proposal;
+    },
 
-      const members: StoredSessionMember[] = [
-        {
-          sessionId: session.id,
-          userId: userA.id,
-          joinedAt: now,
-          confirmedAt: null,
-        },
-        {
-          sessionId: session.id,
-          userId: userB.id,
-          joinedAt: now,
-          confirmedAt: null,
-        },
-      ];
-      membersBySession.set(session.id, members);
+    async listPendingBumpProposals(userId) {
+      const result: BumpProposal[] = [];
+      for (const raw of bumpProposals.values()) {
+        const p = expireProposalIfNeeded(raw);
+        if (p.toUserId !== userId || p.status !== "pending") continue;
+        const fromUser = users.get(p.fromUserId);
+        result.push({
+          id: p.id,
+          fromBumpId: p.fromBumpId,
+          toBumpId: p.toBumpId,
+          fromUserId: p.fromUserId,
+          toUserId: p.toUserId,
+          status: p.status,
+          sessionId: p.sessionId,
+          expiresAt: toIso(p.expiresAt),
+          createdAt: toIso(p.createdAt),
+          fromAvatarUrl: fromUser?.avatarUrl ?? null,
+        });
+      }
+      return result.sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+    },
 
-      const matchedA: StoredBumpIntent = {
-        ...bump,
-        status: "matched",
-        matchedBumpId: partner.id,
-        sessionId: session.id,
+    async acceptBumpProposal(proposalId, userId) {
+      let proposal = bumpProposals.get(proposalId);
+      if (!proposal) throw storeError("Proposal not found", 404);
+      proposal = expireProposalIfNeeded(proposal);
+      if (proposal.toUserId !== userId) {
+        throw storeError("Proposal not found", 404);
+      }
+      if (proposal.status === "expired") {
+        throw storeError("Proposal expired", 410);
+      }
+      if (proposal.status === "rejected") {
+        throw storeError("Proposal rejected", 409);
+      }
+      if (proposal.status === "accepted" && proposal.sessionId) {
+        const bump = bumps.get(proposal.toBumpId)!;
+        const peer = users.get(proposal.fromUserId)!;
+        const session = await this.getSession(proposal.sessionId);
+        return {
+          proposal,
+          bump,
+          peer: {
+            id: peer.id,
+            displayName: peer.displayName,
+            avatarUrl: peer.avatarUrl,
+          },
+          session: session!,
+        };
+      }
+
+      let fromBump = bumps.get(proposal.fromBumpId);
+      let toBump = bumps.get(proposal.toBumpId);
+      if (!fromBump || !toBump) throw storeError("Bump not found", 404);
+      fromBump = expireIfNeeded(fromBump);
+      toBump = expireIfNeeded(toBump);
+      if (fromBump.status === "matched" || toBump.status === "matched") {
+        throw storeError("Bump already matched", 409);
+      }
+
+      const paired = pairBumps(toBump, fromBump);
+      const accepted: StoredBumpProposal = {
+        ...proposal,
+        status: "accepted",
+        sessionId: paired.session.id,
       };
-      const matchedB: StoredBumpIntent = {
-        ...partner,
-        status: "matched",
-        matchedBumpId: bump.id,
-        sessionId: session.id,
-      };
-      bumps.set(matchedA.id, matchedA);
-      bumps.set(matchedB.id, matchedB);
+      bumpProposals.set(accepted.id, accepted);
 
       return {
-        bump: matchedA,
-        peer: userB,
-        session: buildSessionView(session, members, users),
+        proposal: accepted,
+        bump: paired.bump,
+        peer: {
+          id: paired.peer.id,
+          displayName: paired.peer.displayName,
+          avatarUrl: paired.peer.avatarUrl,
+        },
+        session: paired.session,
       };
+    },
+
+    async rejectBumpProposal(proposalId, userId) {
+      let proposal = bumpProposals.get(proposalId);
+      if (!proposal) throw storeError("Proposal not found", 404);
+      proposal = expireProposalIfNeeded(proposal);
+      if (proposal.toUserId !== userId) {
+        throw storeError("Proposal not found", 404);
+      }
+      if (proposal.status !== "pending") {
+        throw storeError("Proposal is not pending", 409);
+      }
+      const rejected: StoredBumpProposal = {
+        ...proposal,
+        status: "rejected",
+      };
+      bumpProposals.set(rejected.id, rejected);
+      return rejected;
     },
 
     async getSession(id) {
@@ -587,6 +832,105 @@ export function createMemoryStore(): Store {
       };
       users.set(updated.id, updated);
       return updated;
+    },
+
+    async listAlbumsForSession(sessionId) {
+      return [...albumsByKey.values()].filter((a) => a.sessionId === sessionId);
+    },
+
+    async getAlbumForUser(sessionId, userId) {
+      return albumsByKey.get(`${sessionId}:${userId}`) ?? null;
+    },
+
+    async createAlbumForUser(sessionId, userId) {
+      const key = `${sessionId}:${userId}`;
+      const existing = albumsByKey.get(key);
+      if (existing) return existing;
+      const session = sessions.get(sessionId);
+      if (!session) {
+        const err = new Error("Session not found");
+        (err as Error & { status: number }).status = 404;
+        throw err;
+      }
+      const fields = freshAlbumForMember(sessionId, userId, session.createdAt);
+      const album: StoredAlbum = {
+        id: randomUUID(),
+        sessionId: fields.sessionId,
+        userId: fields.userId,
+        title: fields.title,
+        gridSize: fields.gridSize,
+        pixels: fields.pixels,
+        coverUrl: fields.coverUrl,
+        editableUntil: fields.editableUntil,
+        readyAt: fields.readyAt,
+        createdAt: fields.createdAt,
+        updatedAt: fields.updatedAt,
+      };
+      albumsByKey.set(key, album);
+      return album;
+    },
+
+    async updateAlbumForUser(sessionId, userId, input: UpdateAlbumInput) {
+      const key = `${sessionId}:${userId}`;
+      const existing = albumsByKey.get(key);
+      if (!existing) return null;
+      const next: StoredAlbum = {
+        ...existing,
+        pixels: input.pixels ?? existing.pixels,
+        coverUrl:
+          input.coverUrl !== undefined ? input.coverUrl : existing.coverUrl,
+        gridSize: input.gridSize ?? existing.gridSize,
+        title: input.title !== undefined ? input.title : existing.title,
+        updatedAt: new Date(),
+      };
+      if (input.gridSize && input.gridSize !== existing.gridSize && !input.pixels) {
+        next.pixels = emptyPixelGrid(input.gridSize);
+      }
+      albumsByKey.set(key, next);
+      return next;
+    },
+
+    async markAlbumReady(sessionId, userId) {
+      const key = `${sessionId}:${userId}`;
+      const existing = albumsByKey.get(key);
+      if (!existing) return null;
+      const next: StoredAlbum = {
+        ...existing,
+        readyAt: existing.readyAt ?? new Date(),
+        updatedAt: new Date(),
+      };
+      albumsByKey.set(key, next);
+      return next;
+    },
+
+    async getAlbumContest(sessionId) {
+      return albumContests.get(sessionId) ?? null;
+    },
+
+    async listAlbumVotes(sessionId) {
+      return [...albumVotes.values()].filter((v) => v.sessionId === sessionId);
+    },
+
+    async upsertAlbumVote(sessionId, voterUserId, choiceUserId) {
+      const key = `${sessionId}:${voterUserId}`;
+      const vote: StoredAlbumVote = {
+        sessionId,
+        voterUserId,
+        choiceUserId,
+      };
+      albumVotes.set(key, vote);
+      return vote;
+    },
+
+    async setAlbumContestWinner(sessionId, winnerUserId, method) {
+      const contest: StoredAlbumContest = {
+        sessionId,
+        winnerUserId,
+        method,
+        resolvedAt: new Date(),
+      };
+      albumContests.set(sessionId, contest);
+      return contest;
     },
 
     async getFriendsMe(userId) {

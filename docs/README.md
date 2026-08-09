@@ -33,9 +33,18 @@ Human-readable product and engineering docs. Agent-oriented YAML specs live unde
 
 | Doc | Contents |
 | --- | --- |
-| [profile/overview.md](profile/overview.md) | Bio, avatar, theme, logout |
+| [profile/overview.md](profile/overview.md) | Bio, pixel avatar, theme, logout |
 | [profile/api.md](profile/api.md) | PATCH /users/me + avatar upload |
 | [profile/data-model.md](profile/data-model.md) | `bio` / `avatar_url` |
+
+## Features — Album
+
+| Doc | Contents |
+| --- | --- |
+| [album/overview.md](album/overview.md) | Joint pixel cover after bump |
+| [album/architecture.md](album/architecture.md) | Neon + Blob + vote/spin |
+| [album/api.md](album/api.md) | Session album + cover upload |
+| [album/data-model.md](album/data-model.md) | `albums` table |
 
 Agent copy: [`.context/features/*/BRIEFING.md`](../.context/) · [spec.yaml](../.context/)
 

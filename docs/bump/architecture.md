@@ -36,7 +36,7 @@ flowchart LR
 | Local without Neon | In-memory when `DATABASE_URL` unset | Two-tab local OK; Preview/Prod need Neon for two phones |
 | Match notify | Short polling in Bump Mode only (~500ms) | Serverless-safe; no long-lived WS |
 | Auth MVP | Bearer token = user id | Bootstrap only; replace with JWT later |
-| Canvas later | PartyKit / Ably / Fly WS | Attach to existing `sessionId` |
+| Canvas / album cover | Per-user covers + poll (see [album](../album/architecture.md)) | Attach to `sessionId`; no long-lived WS on Vercel |
 
 Frontend calls **same-origin** `fetch('/api' + path)`. Recreate / Preview Neon / env switch: [../deploy-vercel.md](../deploy-vercel.md) and root `README.md`.
 
