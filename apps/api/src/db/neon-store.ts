@@ -3,8 +3,12 @@ import { neon } from "@neondatabase/serverless";
 import { and, desc, eq, gt, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import {
+  BUMP_CANDIDATE_WINDOW_MS,
   MATCH_TIME_WINDOW_MS,
+  emptyPixelGrid,
   type ActivityNotification,
+  type BumpCandidate,
+  type BumpProposal,
   type CalendarEvent,
   type EventComment,
   type EventDetail,
@@ -19,12 +23,16 @@ import type {
   CreateBumpInput,
   CreateEventInput,
   InboxFriendRequest,
+  StoredAlbum,
   StoredBumpIntent,
+  StoredBumpProposal,
   StoredFriendRequest,
   StoredUser,
   Store,
+  UpdateAlbumInput,
 } from "./types.js";
-import { orderedFriendshipPair, toIso } from "./types.js";
+import { freshAlbumForMember, orderedFriendshipPair, toIso } from "./types.js";
+import type { StoredAlbumContest, StoredAlbumVote } from "./types.js";
 
 function mapUser(row: typeof schema.users.$inferSelect): StoredUser {
   return {
@@ -37,6 +45,43 @@ function mapUser(row: typeof schema.users.$inferSelect): StoredUser {
     friendCode: row.friendCode ?? "",
     bio: row.bio ?? null,
     createdAt: toIso(row.createdAt),
+  };
+}
+
+function mapAlbum(row: typeof schema.albums.$inferSelect): StoredAlbum {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    userId: row.userId,
+    title: row.title ?? null,
+    gridSize: row.gridSize === 32 ? 32 : 16,
+    pixels: Array.isArray(row.pixels) ? row.pixels : [],
+    coverUrl: row.coverUrl ?? null,
+    editableUntil: row.editableUntil,
+    readyAt: row.readyAt ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapContest(
+  row: typeof schema.albumContests.$inferSelect,
+): StoredAlbumContest {
+  const method =
+    row.method === "vote" || row.method === "spin" ? row.method : null;
+  return {
+    sessionId: row.sessionId,
+    winnerUserId: row.winnerUserId ?? null,
+    method,
+    resolvedAt: row.resolvedAt ?? null,
+  };
+}
+
+function mapVote(row: typeof schema.albumVotes.$inferSelect): StoredAlbumVote {
+  return {
+    sessionId: row.sessionId,
+    voterUserId: row.voterUserId,
+    choiceUserId: row.choiceUserId ?? null,
   };
 }
 
@@ -74,8 +119,23 @@ function mapFriendRequest(
   };
 }
 
-function placesSqlMatch(a: StoredBumpIntent): ReturnType<typeof and> {
-  const serverMs = a.serverTimestamp.getTime();
+function mapBumpProposal(
+  row: typeof schema.bumpProposals.$inferSelect,
+): StoredBumpProposal {
+  return {
+    id: row.id,
+    fromBumpId: row.fromBumpId,
+    toBumpId: row.toBumpId,
+    fromUserId: row.fromUserId,
+    toUserId: row.toUserId,
+    status: row.status as StoredBumpProposal["status"],
+    sessionId: row.sessionId,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+  };
+}
+
+function placeSqlClause(a: StoredBumpIntent) {
   const geoCountry = a.geoCountry;
   const geoCity = a.geoCity;
   const geoRegion = a.geoRegion;
@@ -83,12 +143,7 @@ function placesSqlMatch(a: StoredBumpIntent): ReturnType<typeof and> {
   const geoLng = a.geoLng;
   const ip = a.ip;
 
-  return and(
-    eq(schema.bumpIntents.status, "pending"),
-    ne(schema.bumpIntents.userId, a.userId),
-    gt(schema.bumpIntents.expiresAt, new Date()),
-    sql`abs(extract(epoch from ${schema.bumpIntents.serverTimestamp}) * 1000 - ${serverMs}::float8) <= ${MATCH_TIME_WINDOW_MS}::float8`,
-    sql`(
+  return sql`(
       (${schema.bumpIntents.geoCountry} is not null and ${geoCountry}::text is not null and ${schema.bumpIntents.geoCountry} = ${geoCountry}::text
         and (
           (${schema.bumpIntents.geoCity} is not null and ${geoCity}::text is not null and ${schema.bumpIntents.geoCity} = ${geoCity}::text)
@@ -101,7 +156,18 @@ function placesSqlMatch(a: StoredBumpIntent): ReturnType<typeof and> {
         and sqrt(power(${schema.bumpIntents.geoLat} - ${geoLat}::float8, 2) + power(${schema.bumpIntents.geoLng} - ${geoLng}::float8, 2)) < 0.5
       )
       or ${schema.bumpIntents.ip} = ${ip}::text
-    )`,
+    )`;
+}
+
+function placesSqlMatch(a: StoredBumpIntent): ReturnType<typeof and> {
+  const serverMs = a.serverTimestamp.getTime();
+
+  return and(
+    eq(schema.bumpIntents.status, "pending"),
+    ne(schema.bumpIntents.userId, a.userId),
+    gt(schema.bumpIntents.expiresAt, new Date()),
+    sql`abs(extract(epoch from ${schema.bumpIntents.serverTimestamp}) * 1000 - ${serverMs}::float8) <= ${MATCH_TIME_WINDOW_MS}::float8`,
+    placeSqlClause(a),
   );
 }
 
@@ -156,6 +222,105 @@ export function createNeonStore(databaseUrl: string): Store {
       return mapBump(row);
     }
     return bump;
+  }
+
+  async function expireProposalIfNeeded(
+    proposal: StoredBumpProposal,
+  ): Promise<StoredBumpProposal> {
+    if (
+      proposal.status === "pending" &&
+      proposal.expiresAt.getTime() <= Date.now()
+    ) {
+      const [row] = await db
+        .update(schema.bumpProposals)
+        .set({ status: "expired" })
+        .where(eq(schema.bumpProposals.id, proposal.id))
+        .returning();
+      return mapBumpProposal(row);
+    }
+    return proposal;
+  }
+
+  async function pairBumps(
+    bump: StoredBumpIntent,
+    partner: StoredBumpIntent,
+  ): Promise<{
+    bump: StoredBumpIntent;
+    peer: StoredUser;
+    session: Session;
+  } | null> {
+    const userA = (await getUserById(bump.userId))!;
+    const userB = (await getUserById(partner.userId))!;
+    const sessionId = randomUUID();
+    const now = new Date();
+    const payload: SessionPayload = {
+      profiles: [
+        {
+          userId: userA.id,
+          displayName: userA.displayName,
+          avatarUrl: userA.avatarUrl,
+          photoUrls: [],
+        },
+        {
+          userId: userB.id,
+          displayName: userB.displayName,
+          avatarUrl: userB.avatarUrl,
+          photoUrls: [],
+        },
+      ],
+      notes: "Connected via bump",
+    };
+
+    await db.insert(schema.sessions).values({
+      id: sessionId,
+      createdVia: "bump",
+      status: "pending_confirm",
+      payload,
+      createdAt: now,
+    });
+    await db.insert(schema.sessionMembers).values([
+      { sessionId, userId: userA.id, joinedAt: now },
+      { sessionId, userId: userB.id, joinedAt: now },
+    ]);
+
+    const [matchedA] = await db
+      .update(schema.bumpIntents)
+      .set({
+        status: "matched",
+        matchedBumpId: partner.id,
+        sessionId,
+      })
+      .where(
+        and(
+          eq(schema.bumpIntents.id, bump.id),
+          ne(schema.bumpIntents.status, "matched"),
+        ),
+      )
+      .returning();
+
+    if (!matchedA) return null;
+
+    await db
+      .update(schema.bumpIntents)
+      .set({
+        status: "matched",
+        matchedBumpId: bump.id,
+        sessionId,
+      })
+      .where(eq(schema.bumpIntents.id, partner.id));
+
+    const session = await loadSession(sessionId);
+    return { bump: mapBump(matchedA), peer: userB, session: session! };
+  }
+
+  async function getUserById(id: string): Promise<StoredUser | null> {
+    const [row] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, id))
+      .limit(1);
+    if (!row) return null;
+    return ensureFriendCode(row);
   }
 
   async function loadSession(id: string): Promise<Session | null> {
@@ -558,56 +723,8 @@ export function createNeonStore(databaseUrl: string): Store {
       }
 
       const partner = mapBump(partnerRow);
-      const userA = (await this.getUser(bump.userId))!;
-      const userB = (await this.getUser(partner.userId))!;
-      const sessionId = randomUUID();
-      const now = new Date();
-      const payload: SessionPayload = {
-        profiles: [
-          {
-            userId: userA.id,
-            displayName: userA.displayName,
-            avatarUrl: userA.avatarUrl,
-            photoUrls: [],
-          },
-          {
-            userId: userB.id,
-            displayName: userB.displayName,
-            avatarUrl: userB.avatarUrl,
-            photoUrls: [],
-          },
-        ],
-        notes: "Connected via bump",
-      };
-
-      await db.insert(schema.sessions).values({
-        id: sessionId,
-        createdVia: "bump",
-        status: "pending_confirm",
-        payload,
-        createdAt: now,
-      });
-      await db.insert(schema.sessionMembers).values([
-        { sessionId, userId: userA.id, joinedAt: now },
-        { sessionId, userId: userB.id, joinedAt: now },
-      ]);
-
-      const [matchedA] = await db
-        .update(schema.bumpIntents)
-        .set({
-          status: "matched",
-          matchedBumpId: partner.id,
-          sessionId,
-        })
-        .where(
-          and(
-            eq(schema.bumpIntents.id, bump.id),
-            eq(schema.bumpIntents.status, "pending"),
-          ),
-        )
-        .returning();
-
-      if (!matchedA) {
+      const paired = await pairBumps(bump, partner);
+      if (!paired) {
         const reloaded = await this.getBump(bumpId);
         return {
           bump: reloaded!,
@@ -617,18 +734,246 @@ export function createNeonStore(databaseUrl: string): Store {
             : null,
         };
       }
+      return {
+        bump: paired.bump,
+        peer: paired.peer,
+        session: paired.session,
+      };
+    },
 
-      await db
-        .update(schema.bumpIntents)
-        .set({
-          status: "matched",
-          matchedBumpId: bump.id,
-          sessionId,
+    async listBumpCandidates(bumpId) {
+      let bump = await this.getBump(bumpId);
+      if (!bump) return [];
+      bump = await expireIfNeeded(bump);
+      if (bump.status === "matched") return [];
+
+      const cutoff = new Date(Date.now() - BUMP_CANDIDATE_WINDOW_MS);
+      const rows = await db
+        .select({
+          bump: schema.bumpIntents,
+          user: schema.users,
         })
-        .where(eq(schema.bumpIntents.id, partner.id));
+        .from(schema.bumpIntents)
+        .innerJoin(
+          schema.users,
+          eq(schema.bumpIntents.userId, schema.users.id),
+        )
+        .where(
+          and(
+            ne(schema.bumpIntents.id, bump.id),
+            ne(schema.bumpIntents.userId, bump.userId),
+            ne(schema.bumpIntents.status, "matched"),
+            gt(schema.bumpIntents.serverTimestamp, cutoff),
+            placeSqlClause(bump),
+          ),
+        )
+        .orderBy(desc(schema.bumpIntents.serverTimestamp))
+        .limit(40);
 
-      const session = await loadSession(sessionId);
-      return { bump: mapBump(matchedA), peer: userB, session };
+      const byUser = new Map<string, BumpCandidate>();
+      for (const { bump: b, user } of rows) {
+        if (byUser.has(user.id)) continue;
+        byUser.set(user.id, {
+          bumpId: b.id,
+          userId: user.id,
+          avatarUrl: user.avatarUrl,
+        });
+      }
+      return [...byUser.values()];
+    },
+
+    async createBumpProposal(fromBumpId, targetBumpId, fromUserId) {
+      let fromBump = await this.getBump(fromBumpId);
+      if (!fromBump || fromBump.userId !== fromUserId) {
+        throw storeError("Bump not found", 404);
+      }
+      fromBump = await expireIfNeeded(fromBump);
+      if (fromBump.status === "matched") {
+        throw storeError("Bump already matched", 409);
+      }
+
+      let target = await this.getBump(targetBumpId);
+      if (!target) throw storeError("Target bump not found", 404);
+      target = await expireIfNeeded(target);
+      if (target.userId === fromUserId) {
+        throw storeError("Cannot propose to yourself", 400);
+      }
+      if (target.status === "matched") {
+        throw storeError("Target already matched", 409);
+      }
+
+      const cutoff = Date.now() - BUMP_CANDIDATE_WINDOW_MS;
+      if (target.serverTimestamp.getTime() < cutoff) {
+        throw storeError("Target bump too old", 410);
+      }
+
+      const [placeOk] = await db
+        .select({ id: schema.bumpIntents.id })
+        .from(schema.bumpIntents)
+        .where(
+          and(eq(schema.bumpIntents.id, target.id), placeSqlClause(fromBump)),
+        )
+        .limit(1);
+      if (!placeOk) {
+        throw storeError("Target not in same place", 400);
+      }
+
+      const [existing] = await db
+        .select()
+        .from(schema.bumpProposals)
+        .where(
+          and(
+            eq(schema.bumpProposals.fromBumpId, fromBumpId),
+            eq(schema.bumpProposals.toBumpId, targetBumpId),
+            eq(schema.bumpProposals.status, "pending"),
+            gt(schema.bumpProposals.expiresAt, new Date()),
+          ),
+        )
+        .limit(1);
+      if (existing) return mapBumpProposal(existing);
+
+      const now = new Date();
+      const [row] = await db
+        .insert(schema.bumpProposals)
+        .values({
+          fromBumpId,
+          toBumpId: targetBumpId,
+          fromUserId,
+          toUserId: target.userId,
+          status: "pending",
+          expiresAt: new Date(now.getTime() + BUMP_CANDIDATE_WINDOW_MS),
+          createdAt: now,
+        })
+        .returning();
+      return mapBumpProposal(row);
+    },
+
+    async listPendingBumpProposals(userId) {
+      const rows = await db
+        .select({
+          proposal: schema.bumpProposals,
+          fromUser: schema.users,
+        })
+        .from(schema.bumpProposals)
+        .innerJoin(
+          schema.users,
+          eq(schema.bumpProposals.fromUserId, schema.users.id),
+        )
+        .where(
+          and(
+            eq(schema.bumpProposals.toUserId, userId),
+            eq(schema.bumpProposals.status, "pending"),
+            gt(schema.bumpProposals.expiresAt, new Date()),
+          ),
+        )
+        .orderBy(desc(schema.bumpProposals.createdAt));
+
+      const result: BumpProposal[] = [];
+      for (const { proposal, fromUser } of rows) {
+        const p = await expireProposalIfNeeded(mapBumpProposal(proposal));
+        if (p.status !== "pending") continue;
+        result.push({
+          id: p.id,
+          fromBumpId: p.fromBumpId,
+          toBumpId: p.toBumpId,
+          fromUserId: p.fromUserId,
+          toUserId: p.toUserId,
+          status: p.status,
+          sessionId: p.sessionId,
+          expiresAt: toIso(p.expiresAt),
+          createdAt: toIso(p.createdAt),
+          fromAvatarUrl: fromUser.avatarUrl,
+        });
+      }
+      return result;
+    },
+
+    async acceptBumpProposal(proposalId, userId) {
+      const [row] = await db
+        .select()
+        .from(schema.bumpProposals)
+        .where(eq(schema.bumpProposals.id, proposalId))
+        .limit(1);
+      if (!row) throw storeError("Proposal not found", 404);
+      let proposal = await expireProposalIfNeeded(mapBumpProposal(row));
+      if (proposal.toUserId !== userId) {
+        throw storeError("Proposal not found", 404);
+      }
+      if (proposal.status === "expired") {
+        throw storeError("Proposal expired", 410);
+      }
+      if (proposal.status === "rejected") {
+        throw storeError("Proposal rejected", 409);
+      }
+      if (proposal.status === "accepted" && proposal.sessionId) {
+        const bump = (await this.getBump(proposal.toBumpId))!;
+        const peer = (await this.getUser(proposal.fromUserId))!;
+        const session = await loadSession(proposal.sessionId);
+        return {
+          proposal,
+          bump,
+          peer: {
+            id: peer.id,
+            displayName: peer.displayName,
+            avatarUrl: peer.avatarUrl,
+          },
+          session: session!,
+        };
+      }
+
+      let fromBump = await this.getBump(proposal.fromBumpId);
+      let toBump = await this.getBump(proposal.toBumpId);
+      if (!fromBump || !toBump) throw storeError("Bump not found", 404);
+      fromBump = await expireIfNeeded(fromBump);
+      toBump = await expireIfNeeded(toBump);
+      if (fromBump.status === "matched" || toBump.status === "matched") {
+        throw storeError("Bump already matched", 409);
+      }
+
+      const paired = await pairBumps(toBump, fromBump);
+      if (!paired) throw storeError("Bump already matched", 409);
+
+      const [accepted] = await db
+        .update(schema.bumpProposals)
+        .set({
+          status: "accepted",
+          sessionId: paired.session.id,
+        })
+        .where(eq(schema.bumpProposals.id, proposal.id))
+        .returning();
+
+      return {
+        proposal: mapBumpProposal(accepted),
+        bump: paired.bump,
+        peer: {
+          id: paired.peer.id,
+          displayName: paired.peer.displayName,
+          avatarUrl: paired.peer.avatarUrl,
+        },
+        session: paired.session,
+      };
+    },
+
+    async rejectBumpProposal(proposalId, userId) {
+      const [row] = await db
+        .select()
+        .from(schema.bumpProposals)
+        .where(eq(schema.bumpProposals.id, proposalId))
+        .limit(1);
+      if (!row) throw storeError("Proposal not found", 404);
+      let proposal = await expireProposalIfNeeded(mapBumpProposal(row));
+      if (proposal.toUserId !== userId) {
+        throw storeError("Proposal not found", 404);
+      }
+      if (proposal.status !== "pending") {
+        throw storeError("Proposal is not pending", 409);
+      }
+      const [rejected] = await db
+        .update(schema.bumpProposals)
+        .set({ status: "rejected" })
+        .where(eq(schema.bumpProposals.id, proposal.id))
+        .returning();
+      return mapBumpProposal(rejected);
     },
 
     async getSession(id) {
@@ -695,6 +1040,147 @@ export function createNeonStore(databaseUrl: string): Store {
         .where(eq(schema.users.id, userId))
         .returning();
       return mapUser(updated);
+    },
+
+    async listAlbumsForSession(sessionId) {
+      const rows = await db
+        .select()
+        .from(schema.albums)
+        .where(eq(schema.albums.sessionId, sessionId));
+      return rows.map(mapAlbum);
+    },
+
+    async getAlbumForUser(sessionId, userId) {
+      const [row] = await db
+        .select()
+        .from(schema.albums)
+        .where(
+          and(
+            eq(schema.albums.sessionId, sessionId),
+            eq(schema.albums.userId, userId),
+          ),
+        )
+        .limit(1);
+      return row ? mapAlbum(row) : null;
+    },
+
+    async createAlbumForUser(sessionId, userId) {
+      const existing = await this.getAlbumForUser(sessionId, userId);
+      if (existing) return existing;
+
+      const [session] = await db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, sessionId))
+        .limit(1);
+      if (!session) throw storeError("Session not found", 404);
+
+      const fields = freshAlbumForMember(sessionId, userId, session.createdAt);
+      const [inserted] = await db
+        .insert(schema.albums)
+        .values({
+          sessionId: fields.sessionId,
+          userId: fields.userId,
+          title: fields.title,
+          gridSize: fields.gridSize,
+          pixels: fields.pixels,
+          coverUrl: fields.coverUrl,
+          editableUntil: fields.editableUntil,
+          readyAt: fields.readyAt,
+          createdAt: fields.createdAt,
+          updatedAt: fields.updatedAt,
+        })
+        .returning();
+      return mapAlbum(inserted);
+    },
+
+    async updateAlbumForUser(sessionId, userId, input: UpdateAlbumInput) {
+      const existing = await this.getAlbumForUser(sessionId, userId);
+      if (!existing) return null;
+
+      let pixels = input.pixels ?? existing.pixels;
+      const gridSize = input.gridSize ?? existing.gridSize;
+      if (input.gridSize && input.gridSize !== existing.gridSize && !input.pixels) {
+        pixels = emptyPixelGrid(input.gridSize);
+      }
+
+      const [updated] = await db
+        .update(schema.albums)
+        .set({
+          pixels,
+          coverUrl:
+            input.coverUrl !== undefined ? input.coverUrl : existing.coverUrl,
+          gridSize,
+          title: input.title !== undefined ? input.title : existing.title,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.albums.sessionId, sessionId),
+            eq(schema.albums.userId, userId),
+          ),
+        )
+        .returning();
+      return updated ? mapAlbum(updated) : null;
+    },
+
+    async markAlbumReady(sessionId, userId) {
+      const existing = await this.getAlbumForUser(sessionId, userId);
+      if (!existing) return null;
+      if (existing.readyAt) return existing;
+      const [updated] = await db
+        .update(schema.albums)
+        .set({ readyAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.albums.sessionId, sessionId),
+            eq(schema.albums.userId, userId),
+          ),
+        )
+        .returning();
+      return updated ? mapAlbum(updated) : null;
+    },
+
+    async getAlbumContest(sessionId) {
+      const [row] = await db
+        .select()
+        .from(schema.albumContests)
+        .where(eq(schema.albumContests.sessionId, sessionId))
+        .limit(1);
+      return row ? mapContest(row) : null;
+    },
+
+    async listAlbumVotes(sessionId) {
+      const rows = await db
+        .select()
+        .from(schema.albumVotes)
+        .where(eq(schema.albumVotes.sessionId, sessionId));
+      return rows.map(mapVote);
+    },
+
+    async upsertAlbumVote(sessionId, voterUserId, choiceUserId) {
+      const [row] = await db
+        .insert(schema.albumVotes)
+        .values({ sessionId, voterUserId, choiceUserId })
+        .onConflictDoUpdate({
+          target: [schema.albumVotes.sessionId, schema.albumVotes.voterUserId],
+          set: { choiceUserId },
+        })
+        .returning();
+      return mapVote(row);
+    },
+
+    async setAlbumContestWinner(sessionId, winnerUserId, method) {
+      const resolvedAt = new Date();
+      const [row] = await db
+        .insert(schema.albumContests)
+        .values({ sessionId, winnerUserId, method, resolvedAt })
+        .onConflictDoUpdate({
+          target: schema.albumContests.sessionId,
+          set: { winnerUserId, method, resolvedAt },
+        })
+        .returning();
+      return mapContest(row);
     },
 
     async getFriendsMe(userId) {

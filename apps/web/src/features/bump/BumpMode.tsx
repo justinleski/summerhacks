@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Session } from "@summerhacks/shared";
+import type { BumpCandidate, BumpProposal, Session } from "@summerhacks/shared";
 import { api } from "../../lib/api";
 import { useAccelerometerBump } from "./useAccelerometerBump";
+import { useBumpFallback } from "./useBumpFallback";
 import { useBumpHaptics, vibrateConfirm } from "./useBumpHaptics";
 import { useBumpSearch } from "./useBumpSearch";
 
@@ -12,15 +13,71 @@ type Phase =
   | "searching"
   | "matched_confirm"
   | "expired"
+  | "proposal_incoming"
   | "error";
 
 const THRESHOLD = 16;
 
+function AnonymousAvatar({
+  avatarUrl,
+  selected,
+  disabled,
+  onClick,
+  label,
+}: {
+  avatarUrl: string | null;
+  selected?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+  label: string;
+}) {
+  const inner = avatarUrl ? (
+    <img src={avatarUrl} alt="" />
+  ) : (
+    <span className="bump-avatar__placeholder" aria-hidden>
+      ?
+    </span>
+  );
+
+  if (!onClick) {
+    return (
+      <div className="bump-avatar" aria-label={label} role="img">
+        {inner}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={`bump-avatar${selected ? " bump-avatar--selected" : ""}`}
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={label}
+    >
+      {inner}
+    </button>
+  );
+}
+
 export function BumpMode({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const [phase, setPhase] = useState<Phase>("idle");
-  const { bump, error, startSearch, cancel } = useBumpSearch();
+  const { bump, error, startSearch, cancel, setBump } = useBumpSearch();
   const [confirming, setConfirming] = useState(false);
+  const [activeProposal, setActiveProposal] = useState<BumpProposal | null>(
+    null,
+  );
+
+  const fallback = useBumpFallback(
+    bump,
+    phase === "expired" || phase === "proposal_incoming",
+    (next) => {
+      setBump(next);
+      setActiveProposal(null);
+      setPhase("matched_confirm");
+    },
+  );
 
   const { magnitude, permission, requestPermission, resetPeakGate } =
     useAccelerometerBump({
@@ -49,6 +106,15 @@ export function BumpMode({ onClose }: { onClose: () => void }) {
     if (bump.status === "matched") setPhase("matched_confirm");
     if (bump.status === "expired") setPhase("expired");
   }, [bump, phase]);
+
+  useEffect(() => {
+    if (phase !== "expired") return;
+    const first = fallback.incoming[0];
+    if (first) {
+      setActiveProposal(first);
+      setPhase("proposal_incoming");
+    }
+  }, [fallback.incoming, phase]);
 
   async function enterMode() {
     const ok = await requestPermission();
@@ -91,6 +157,10 @@ export function BumpMode({ onClose }: { onClose: () => void }) {
   async function leave() {
     await cancel();
     onClose();
+  }
+
+  function onPickCandidate(c: BumpCandidate) {
+    void fallback.propose(c.bumpId);
   }
 
   return (
@@ -150,8 +220,64 @@ export function BumpMode({ onClose }: { onClose: () => void }) {
           )}
           {phase === "expired" && (
             <>
-              <h1>No match</h1>
-              <p>The bump window expired. Try again with the other phone.</p>
+              <h1>Was this you?</h1>
+              <p>
+                Auto-match missed. Tap an anonymous nearby avatar if you see
+                who you meant to bump — or try again.
+              </p>
+              {fallback.candidates.length > 0 ? (
+                <div className="bump-candidate-grid" role="list">
+                  {fallback.candidates.map((c) => (
+                    <AnonymousAvatar
+                      key={c.bumpId}
+                      avatarUrl={c.avatarUrl}
+                      selected={fallback.proposedIds.has(c.bumpId)}
+                      disabled={
+                        fallback.proposingId != null ||
+                        fallback.proposedIds.has(c.bumpId)
+                      }
+                      label={
+                        fallback.proposedIds.has(c.bumpId)
+                          ? "Proposal sent"
+                          : "Propose bump"
+                      }
+                      onClick={() => onPickCandidate(c)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="bump-candidate-empty">No nearby candidates yet.</p>
+              )}
+              {fallback.proposingId && (
+                <p className="bump-fallback-status">Sending…</p>
+              )}
+              {fallback.proposedIds.size > 0 && !fallback.proposingId && (
+                <p className="bump-fallback-status">
+                  Waiting for them to confirm…
+                </p>
+              )}
+              {(fallback.error || error) && (
+                <p className="bump-fallback-error">
+                  {fallback.error ?? error}
+                </p>
+              )}
+            </>
+          )}
+          {phase === "proposal_incoming" && activeProposal && (
+            <>
+              <h1>Was this you?</h1>
+              <p>Someone nearby thinks they bumped you.</p>
+              <div className="bump-incoming-avatar">
+                <AnonymousAvatar
+                  avatarUrl={activeProposal.fromAvatarUrl ?? null}
+                  label="Incoming bump proposal"
+                />
+              </div>
+              {(fallback.error || error) && (
+                <p className="bump-fallback-error">
+                  {fallback.error ?? error}
+                </p>
+              )}
             </>
           )}
           {phase === "error" && (
@@ -184,12 +310,37 @@ export function BumpMode({ onClose }: { onClose: () => void }) {
             {confirming ? "Opening…" : "Confirm connection"}
           </button>
         )}
+        {phase === "proposal_incoming" && activeProposal && (
+          <>
+            <button
+              type="button"
+              className="primary"
+              disabled={fallback.acting}
+              onClick={() => void fallback.accept(activeProposal.id)}
+            >
+              {fallback.acting ? "…" : "Yes, that was me"}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={fallback.acting}
+              onClick={async () => {
+                await fallback.reject(activeProposal.id);
+                setActiveProposal(null);
+                setPhase("expired");
+              }}
+            >
+              No
+            </button>
+          </>
+        )}
         {(phase === "expired" || phase === "error") && (
           <button
             type="button"
             className="primary"
             onClick={() => {
               resetPeakGate();
+              setActiveProposal(null);
               setPhase("listening");
             }}
           >

@@ -2,14 +2,17 @@ import { Hono } from "hono";
 import {
   BUMP_EXPIRY_MS,
   createBumpBodySchema,
+  proposeBumpBodySchema,
+  type BumpProposal,
   type BumpResponse,
   type PeerSummary,
 } from "@summerhacks/shared";
 import { getStore } from "../db/index.js";
-import type { StoredBumpIntent, StoredUser } from "../db/types.js";
+import type { StoredBumpIntent, StoredBumpProposal, StoredUser } from "../db/types.js";
 import { toIso } from "../db/types.js";
 import { requireAuth, type AuthVariables } from "../middleware/auth.js";
 import { geoFromRequest } from "../services/geoFromRequest.js";
+import { httpErrorFromStore } from "./http-errors.js";
 
 function peerSummary(user: StoredUser): PeerSummary {
   return {
@@ -29,6 +32,23 @@ function bumpResponse(
     expiresAt: toIso(bump.expiresAt),
     sessionId: bump.sessionId,
     peer: peer ? peerSummary(peer) : null,
+  };
+}
+
+function proposalResponse(proposal: StoredBumpProposal): Omit<
+  BumpProposal,
+  "fromAvatarUrl"
+> {
+  return {
+    id: proposal.id,
+    fromBumpId: proposal.fromBumpId,
+    toBumpId: proposal.toBumpId,
+    fromUserId: proposal.fromUserId,
+    toUserId: proposal.toUserId,
+    status: proposal.status,
+    sessionId: proposal.sessionId,
+    expiresAt: toIso(proposal.expiresAt),
+    createdAt: toIso(proposal.createdAt),
   };
 }
 
@@ -54,6 +74,67 @@ bumpsRoutes.post("/", async (c) => {
 
   const matched = await store.tryMatchBump(bump.id);
   return c.json(bumpResponse(matched.bump, matched.peer), 201);
+});
+
+/** Incoming "was this you?" proposals — register before /:id */
+bumpsRoutes.get("/proposals", async (c) => {
+  const proposals = await getStore().listPendingBumpProposals(c.get("userId"));
+  return c.json({ proposals });
+});
+
+bumpsRoutes.post("/proposals/:id/accept", async (c) => {
+  try {
+    const result = await getStore().acceptBumpProposal(
+      c.req.param("id"),
+      c.get("userId"),
+    );
+    return c.json({
+      proposalId: result.proposal.id,
+      status: "accepted" as const,
+      sessionId: result.session.id,
+      bumpId: result.bump.id,
+      peer: result.peer,
+    });
+  } catch (err) {
+    return httpErrorFromStore(c, err);
+  }
+});
+
+bumpsRoutes.post("/proposals/:id/reject", async (c) => {
+  try {
+    const proposal = await getStore().rejectBumpProposal(
+      c.req.param("id"),
+      c.get("userId"),
+    );
+    return c.json(proposalResponse(proposal));
+  } catch (err) {
+    return httpErrorFromStore(c, err);
+  }
+});
+
+bumpsRoutes.get("/:id/candidates", async (c) => {
+  const store = getStore();
+  const userId = c.get("userId");
+  const bump = await store.getBump(c.req.param("id"));
+  if (!bump || bump.userId !== userId) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const candidates = await store.listBumpCandidates(bump.id);
+  return c.json({ candidates });
+});
+
+bumpsRoutes.post("/:id/propose", async (c) => {
+  const body = proposeBumpBodySchema.parse(await c.req.json());
+  try {
+    const proposal = await getStore().createBumpProposal(
+      c.req.param("id"),
+      body.targetBumpId,
+      c.get("userId"),
+    );
+    return c.json(proposalResponse(proposal), 201);
+  } catch (err) {
+    return httpErrorFromStore(c, err);
+  }
 });
 
 bumpsRoutes.get("/:id", async (c) => {

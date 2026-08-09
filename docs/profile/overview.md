@@ -1,6 +1,6 @@
 # Profile — overview
 
-Signed-in users manage display name, short bio, and profile photo on `/profile`. Avatar uploads use the same Vercel Blob token as event images. Users can also draw a low-fidelity **16×16 pixel avatar** in a full-screen editor; Save rasterizes to PNG and follows the same upload → `PATCH avatarUrl` path. Friend code on Profile includes a Copy control. Theme (dark/light) is a local preference only.
+Signed-in users manage display name, short bio, and a **16×16 pixel avatar** on `/profile` (no photo file upload). Save rasterizes to PNG → Vercel Blob → `PATCH avatarUrl`. Friend code includes Copy. Theme (dark/light) is local only.
 
 ## Related
 

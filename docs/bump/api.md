@@ -99,6 +99,46 @@ Statuses: `pending` | `matched` | `expired`.
 
 Cancel when leaving Bump Mode. Marks the intent expired if still pending.
 
+### `GET /api/bumps/:id/candidates`
+
+Anonymous same-place candidates after auto-match expires (or while still eligible). Owner-only. Each item is `{ bumpId, userId, avatarUrl }` — **no displayName**.
+
+Candidates: other unmatched intents in the same coarse place with `server_timestamp` within `BUMP_CANDIDATE_WINDOW_MS` (45s).
+
+### `POST /api/bumps/:id/propose`
+
+Send a "was this you?" propose from this bump to a candidate.
+
+**Body**
+
+```json
+{ "targetBumpId": "..." }
+```
+
+**Response** (`201`) — proposal with short TTL aligned to the candidate window.
+
+### `GET /api/bumps/proposals`
+
+Pending incoming proposals for the current user (poll while in expired / fallback UI). Includes `fromAvatarUrl` (no displayName required).
+
+### `POST /api/bumps/proposals/:id/accept`
+
+Accept an incoming proposal. Creates session `pending_confirm`, marks both bumps `matched`. Response:
+
+```json
+{
+  "proposalId": "...",
+  "status": "accepted",
+  "sessionId": "...",
+  "bumpId": "...",
+  "peer": { "id": "...", "displayName": "Sam", "avatarUrl": null }
+}
+```
+
+### `POST /api/bumps/proposals/:id/reject`
+
+Decline; proposal status becomes `rejected`.
+
 ## Sessions
 
 ### `GET /api/sessions`

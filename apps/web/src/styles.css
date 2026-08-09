@@ -594,8 +594,8 @@ html[data-theme="light"] .pixel-editor-overlay {
   aspect-ratio: 1;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(16, 1fr);
-  grid-template-rows: repeat(16, 1fr);
+  grid-template-columns: repeat(var(--pixel-grid, 16), 1fr);
+  grid-template-rows: repeat(var(--pixel-grid, 16), 1fr);
   border: 2px solid var(--border);
   border-radius: 0.5rem;
   overflow: hidden;
@@ -691,6 +691,133 @@ html[data-theme="light"] .pixel-swatch--empty {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+.album-cover-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.album-cover-preview {
+  width: min(100%, 12rem);
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  border: 2px solid var(--border);
+  image-rendering: pixelated;
+}
+
+.album-cover-preview--empty {
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.cover-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  width: 100%;
+}
+
+.cover-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.cover-card__name {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.cover-card--winner .album-cover-preview {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.cover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.cover-spin {
+  width: 100%;
+  padding: 0.5rem 0 1rem;
+}
+
+.cover-spin__label {
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.cover-spin__rail {
+  display: flex;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.cover-spin__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: center;
+  opacity: 0.4;
+  transform: scale(0.94);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease,
+    filter 0.12s ease;
+}
+
+.cover-spin__item img,
+.cover-spin__blank {
+  width: 7.5rem;
+  aspect-ratio: 1;
+  border-radius: 0.45rem;
+  border: 2px solid var(--border);
+  object-fit: cover;
+  image-rendering: pixelated;
+  background: var(--surface);
+}
+
+.cover-spin__item span {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.cover-spin__item--active {
+  opacity: 1;
+  transform: scale(1.06);
+  filter: brightness(1.08);
+}
+
+.cover-spin__item--active img,
+.cover-spin__item--active .cover-spin__blank {
+  border-color: var(--accent);
+}
+
+.cover-spin__item--winner {
+  animation: cover-win-pulse 0.55s ease-out 2;
+}
+
+@keyframes cover-win-pulse {
+  0%,
+  100% {
+    transform: scale(1.06);
+  }
+  50% {
+    transform: scale(1.12);
+  }
 }
 
 .toast {

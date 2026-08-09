@@ -154,6 +154,10 @@ Production alias used in bring-up: `https://summerhacks-ebon.vercel.app`
 
 Haptics alone do **not** prove a match — confirm + shared session does.
 
+### Album covers (vote / spin)
+
+Each member draws their own cover, marks ready, then votes. Contested or undecided outcomes use a server-picked spin with a client highlight animation. No PartyKit. Optional: `ALBUM_EDIT_WINDOW_MS=60000` on the API to test the edit lock quickly. Apply `apps/api/drizzle/0001_album_covers.sql` (or `db:push`) after pulling. See [album/overview.md](album/overview.md).
+
 Quick API check:
 
 ```bash
@@ -164,7 +168,7 @@ curl https://summerhacks-ebon.vercel.app/api/health
 ## Related docs
 
 - [How bump works](bump/overview.md)
-- [Friends](friends/overview.md) · [Calendar](calendar/overview.md) · [Profile](profile/overview.md)
+- [Album cover](album/overview.md) · [Friends](friends/overview.md) · [Calendar](calendar/overview.md) · [Profile](profile/overview.md)
 - [Matching rules](bump/matching.md)
 - [Architecture](bump/architecture.md)
 - [Session bring-up notes](session-2026-08-08-vercel-neon.md)

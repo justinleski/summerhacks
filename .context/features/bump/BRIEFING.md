@@ -10,7 +10,7 @@ Photo-sharing direction long-term; **MVP is Bump only** (not full feed, not coll
 
 **Bump:** two users enter explicit **Bump Mode**, shake (accelerometer), server pairs them by **time + coarse IP geo**, opens a **durable shared session** they can reopen later **without bumping again**.
 
-**Canvas / WebSockets:** deferred. Same `sessionId` will become the realtime room later (PartyKit / Ably / Fly — not long-lived WS on Vercel serverless).
+**Canvas / album cover:** each member draws their own cover; reveal → vote → optional spin. Neon durable pixels. No PartyKit. See `.context/features/album/`.
 
 ---
 
@@ -21,7 +21,8 @@ Photo-sharing direction long-term; **MVP is Bump only** (not full feed, not coll
 3. Accel peak (threshold ~16) or Simulate → `POST /api/bumps` (+ IP geo)
 4. Match within ±2s server time + place; create session `pending_confirm`
 5. Poll `GET /api/bumps/:id` (~500ms) until matched/expired
-6. Both users confirm → session `active` → navigate `/session/:id`
+6. If expired: anonymous same-place candidates (last 45s) → propose → peer accept → same session
+7. Both users confirm → session `active` → navigate `/session/:id`
 
 **Correctness = matched → confirm → same sessionId.** Haptics alone do not prove a match.
 
@@ -56,12 +57,13 @@ Frontend calls **same-origin** `fetch('/api' + path)` — no separate API host o
 
 ## Matching rules (remember these)
 
-Constants: `MATCH_TIME_WINDOW_MS=2000`, `BUMP_EXPIRY_MS=8000`, `BUMP_POLL_INTERVAL_MS=500`
+Constants: `MATCH_TIME_WINDOW_MS=2000`, `BUMP_EXPIRY_MS=8000`, `BUMP_POLL_INTERVAL_MS=500`, `BUMP_CANDIDATE_WINDOW_MS=45000`
 
 - **Time window:** ~±2000ms (prefer **server receive time**)
 - **Place** (any one): same country + (city or region); OR lat/lng Euclidean < 0.5°; OR same IP
 - **No browser geolocation** in MVP (GPS optional later; nullable lat/lng reserved)
 - **Expiry:** ~8000ms unmatched → expired
+- **Candidate fallback:** same place + intent created in last **45s**; anonymous avatars (no names); propose/accept → session
 - **One-to-one** transactional-ish match; **both** members must confirm before `active`
 - **Accelerometer:** client UX + intent gate (threshold ~16); optional `peakMagnitude` on intent
 - Local stub geo via `DEV_GEO_*` so localhost clients can match
@@ -80,7 +82,7 @@ Constants: `MATCH_TIME_WINDOW_MS=2000`, `BUMP_EXPIRY_MS=8000`, `BUMP_POLL_INTERV
 
 ## UI phases (client)
 
-`idle → listening → searching → matched_confirm` (+ `expired` / `error`). Confirm navigates to `/session/:id`.
+`idle → listening → searching → matched_confirm` (+ `expired` / `proposal_incoming` / `error`). Confirm navigates to `/session/:id`.
 
 ---
 
@@ -93,6 +95,7 @@ Constants: `MATCH_TIME_WINDOW_MS=2000`, `BUMP_EXPIRY_MS=8000`, `BUMP_POLL_INTERV
 
 **Ephemeral**
 - `bump_intents` — matching queue + IP geo fields + idempotencyKey + status + expiresAt
+- `bump_proposals` — short-lived "was this you?" proposes (TTL ≈ candidate window)
 
 **Flexible blobs:** `sessions.payload` JSONB (profiles, photo URLs, later canvas meta) — **do not add Mongo**; dual-DB was rejected for MVP.
 
@@ -105,6 +108,10 @@ Constants: `MATCH_TIME_WINDOW_MS=2000`, `BUMP_EXPIRY_MS=8000`, `BUMP_POLL_INTERV
 - `POST /api/bumps` — `{ clientTimestamp, peakMagnitude?, idempotencyKey }` → pending/matched
 - `GET /api/bumps/:id` — poll while searching (also retries match)
 - `DELETE /api/bumps/:id` — leave Bump Mode / cancel
+- `GET /api/bumps/:id/candidates` — anonymous `{ bumpId, userId, avatarUrl }`
+- `POST /api/bumps/:id/propose` — `{ targetBumpId }`
+- `GET /api/bumps/proposals` — pending incoming proposes
+- `POST /api/bumps/proposals/:id/accept|reject`
 - `GET /api/sessions`, `GET /api/sessions/:id`, `POST /api/sessions/:id/confirm`
 
 ---
@@ -183,12 +190,13 @@ packages/shared                    # constants + Zod schemas
 
 ## Explicit non-goals (MVP)
 
-- Collaborative canvas protocol / WebSockets  
+- Collaborative canvas protocol / WebSockets → **removed**; album covers are per-user + vote/spin
 - GPS matching  
 - Full social feed  
 - NFC / QR fallback  
 - Strong anti-spoofing  
 - Mongo / dual database  
+- P2P bump transport  
 
 ---
 
@@ -210,7 +218,7 @@ packages/shared                    # constants + Zod schemas
 3. **Postgres + JSONB, not Mongo** — relations for match/list, JSONB for OO payloads.  
 4. **Neon = hosted Postgres for serverless**, not a different data model.  
 5. **No GPS in MVP** — IP geo + tight time window + accel.  
-6. **Vercel ≠ long-lived WebSocket server** — poll for bump; canvas later elsewhere.  
+6. **Vercel ≠ long-lived WebSocket server** — poll for bump and for album cover contest state.  
 7. **iOS has no `navigator.vibrate`** — plan visual feedback.  
 8. **Same-origin `/api` on Vercel** — frontend must keep relative `/api` paths.  
 9. **`api/index.ts` + rewrite**, not Next-style catch-all filenames.  

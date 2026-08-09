@@ -3,15 +3,13 @@ version: 0.1.0
 name: Profile
 status: implemented
 summary: >
-  User profile page with display name, bio, avatar upload via Vercel Blob
-  (photo or 16×16 pixel-editor PNG), friend-code copy, logout, and
-  client-side dark/light theme preference.
+  User profile page with display name, bio, 16×16 pixel avatar (Vercel Blob),
+  friend-code copy, logout, and client-side dark/light theme preference.
 
 goals:
   - /profile route with home nav link
   - Edit displayName + bio (≤280)
-  - Avatar upload via POST /api/uploads/avatar then PATCH /api/users/me
-  - Pixel avatar editor (modal) rasterizes PNG into the same upload path
+  - Pixel avatar editor only (no photo file upload) → POST /api/uploads/avatar then PATCH /api/users/me
   - Copy friend code on Profile (and Friends)
   - Logout (clearAuth + Neon signOut)
   - Dark/light theme via localStorage + data-theme
@@ -19,7 +17,7 @@ goals:
 non_goals:
   - Public profile pages for other users
   - Server-persisted theme preference
-
+  - Photo file picker for avatar (removed; pixel editor only)
 constraints:
   blob: BLOB_READ_WRITE_TOKEN shared with event images
   theme: client-only

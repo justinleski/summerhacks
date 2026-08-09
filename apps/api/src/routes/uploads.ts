@@ -23,7 +23,7 @@ async function uploadImage(
     json: (body: unknown, status?: number) => Response;
     get: (key: "userId") => string;
   },
-  folder: "events" | "avatars",
+  folder: "events" | "avatars" | "album-covers",
   missingTokenMessage: string,
 ) {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
@@ -72,5 +72,13 @@ uploadsRoutes.post("/avatar", async (c) =>
     c,
     "avatars",
     "Avatar uploads are not configured (BLOB_READ_WRITE_TOKEN unset). You can still save bio and display name.",
+  ),
+);
+
+uploadsRoutes.post("/album-cover", async (c) =>
+  uploadImage(
+    c,
+    "album-covers",
+    "Album cover uploads are not configured (BLOB_READ_WRITE_TOKEN unset).",
   ),
 );
