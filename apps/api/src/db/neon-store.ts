@@ -871,7 +871,8 @@ export function createNeonStore(databaseUrl: string): Store {
         const [updated] = await db
           .update(schema.users)
           .set({
-            displayName: input.displayName || existing.displayName,
+            // Keep app profile name; claims only seed displayName on create.
+            displayName: existing.displayName,
             avatarUrl: input.avatarUrl ?? existing.avatarUrl,
             email: input.email ?? existing.email,
           })

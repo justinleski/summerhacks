@@ -118,7 +118,7 @@ function asAuthClient() {
         password: string;
       }) => Promise<AuthResult>;
       social: (body: {
-        provider: "google" | "github";
+        provider: "google";
         callbackURL: string;
       }) => Promise<unknown>;
     };

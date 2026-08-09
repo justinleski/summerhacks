@@ -1,4 +1,4 @@
-# Neon Auth (Google / GitHub / Email)
+# Neon Auth (Google / Email)
 
 App identity for Summerhacks uses **Neon Managed Better Auth**. Vercel Deployment Protection is unrelated. OTP emails are sent by **Neon Auth** (shared mail provider or your SMTP) — not by Vercel.
 
@@ -6,11 +6,11 @@ App identity for Summerhacks uses **Neon Managed Better Auth**. Vercel Deploymen
 
 | Layer | Behavior |
 | --- | --- |
-| Web | `@neondatabase/neon-js` → Google / GitHub / email+password (+ OTP verify) + guest bootstrap |
-| API | Verifies Neon Auth JWT (`jose` + JWKS), upserts `users.auth_user_id` |
-| Guest | Display-name bootstrap still works (token = app user id) |
+| Web | `@neondatabase/neon-js` → Google / email+password (+ OTP verify) + guest bootstrap; email sign-up and guest collect display name after auth |
+| API | Verifies Neon Auth JWT (`jose` + JWKS), upserts `users.auth_user_id` (keeps existing `display_name` on sync) |
+| Guest | Bootstrap then required display-name step (token = app user id) |
 
-Auth is already enabled on this Neon project with **Google shared credentials**. GitHub needs your own OAuth app in the Neon Console.
+Auth is already enabled on this Neon project with **Google shared credentials**. The app UI does not expose GitHub sign-in.
 
 ## Env
 
@@ -33,10 +33,7 @@ Redeploy after adding env vars.
 2. **Domains / trusted origins**: add `http://localhost:5173` (localhost may already be allowed) and `https://summerhacks-ebon.vercel.app`  
 3. **Google**: shared credentials work for testing; for production add your Google OAuth Client ID/Secret and register redirect  
    `{NEON_AUTH_BASE_URL}/callback/google`  
-4. **GitHub**: create a GitHub OAuth App with callback  
-   `{NEON_AUTH_BASE_URL}/callback/github`  
-   paste Client ID/Secret into Neon Auth → social providers  
-5. **Email**: enable **Sign-up with Email** and **Sign-in with Email**. For OTP on register, enable **Verify at Sign-up** and set verification method to **Verification code** (works with Neon’s shared email provider; codes expire in ~15 minutes). Optional later: custom SMTP for production deliverability.
+4. **Email**: enable **Sign-up with Email** and **Sign-in with Email**. For OTP on register, enable **Verify at Sign-up** and set verification method to **Verification code** (works with Neon’s shared email provider; codes expire in ~15 minutes). Optional later: custom SMTP for production deliverability.
 
 ## Verify
 
@@ -49,19 +46,19 @@ SELECT id, display_name, auth_user_id, email FROM users WHERE auth_user_id IS NO
 
 ## Flows
 
-### Social (Google / GitHub)
+### Social (Google)
 
-1. User taps **Continue with Google** (or GitHub)  
+1. User taps **Continue with Google**  
 2. Neon Auth sets session cookie + returns a short-lived JWT in the `set-auth-jwt` response header (SDK copies it onto `session.token`)  
-3. Web hydrates via `getSession()`, stores that JWT like a guest token, calls `POST /api/users/sync`, then shows the same home UI (Bump / Friends / Calendar / Profile)  
+3. Web hydrates via `getSession()`, stores that JWT like a guest token, calls `POST /api/users/sync`, then shows the main home UI (uses Google/default display name)  
 4. API verifies JWT → upserts app `users` row → bump/session use app `users.id`
 
 ### Email + password + OTP
 
-1. **Sign up**: display name, email, password, confirm password → `signUp.email`  
-2. If `emailVerified === false`, show code form (Neon emails an OTP via shared/custom mail)  
-3. User enters code → `emailOtp.verifyEmail` → same hydrate / sync / home as social  
-4. **Sign in**: email + password → `signIn.email` → hydrate  
+1. User taps **Continue with email** → email/password (sign-in or sign-up) on a separate step  
+2. **Sign up**: email, password, confirm → `signUp.email`; if needed, OTP verify via `emailOtp.verifyEmail`  
+3. After sign-up / verify, user sets a display name (`PATCH /users/me`), then enters the main app  
+4. **Sign in**: email + password → `signIn.email` → hydrate → main app (skips name step)  
 
 Resend uses `emailOtp.sendVerificationOtp` (type `email-verification`).
 

@@ -677,7 +677,8 @@ export function createMemoryStore(): Store {
         let existing = ensureFriendCode(users.get(existingId)!);
         const updated: StoredUser = {
           ...existing,
-          displayName: input.displayName || existing.displayName,
+          // Keep app profile name; claims only seed displayName on create.
+          displayName: existing.displayName,
           avatarUrl: input.avatarUrl ?? existing.avatarUrl,
           email: input.email ?? existing.email,
         };

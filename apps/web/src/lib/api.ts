@@ -8,6 +8,7 @@ const TOKEN_KEY = "summerhacks.token";
 const DEVICE_KEY = "summerhacks.deviceId";
 const NAME_KEY = "summerhacks.displayName";
 const MODE_KEY = "summerhacks.authMode"; // "neon" | "guest"
+const NEEDS_NAME_KEY = "summerhacks.needsName";
 
 export function getDeviceId(): string {
   let id = localStorage.getItem(DEVICE_KEY);
@@ -41,10 +42,21 @@ export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(NAME_KEY);
   localStorage.removeItem(MODE_KEY);
+  localStorage.removeItem(NEEDS_NAME_KEY);
 }
 
 export function getDisplayName(): string {
   return localStorage.getItem(NAME_KEY) ?? "";
+}
+
+/** True when auth succeeded but display name has not been chosen yet. */
+export function getNeedsName(): boolean {
+  return localStorage.getItem(NEEDS_NAME_KEY) === "1";
+}
+
+export function setNeedsName(needs: boolean) {
+  if (needs) localStorage.setItem(NEEDS_NAME_KEY, "1");
+  else localStorage.removeItem(NEEDS_NAME_KEY);
 }
 
 async function resolveBearerToken(): Promise<string | null> {

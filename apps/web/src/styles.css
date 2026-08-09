@@ -173,11 +173,14 @@ button.oauth {
   font-size: 0.9rem;
 }
 
-.email-auth .linkish {
+.email-auth .linkish,
+.home-hero > .linkish {
   justify-self: start;
   padding-left: 0;
   text-decoration: underline;
   text-underline-offset: 0.15em;
+  margin-top: 0.75rem;
+  align-self: start;
 }
 
 .email-auth strong {

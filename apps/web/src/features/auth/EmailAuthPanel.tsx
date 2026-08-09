@@ -7,10 +7,15 @@ import {
   neonVerifyEmailOtp,
 } from "../../lib/neonAuth";
 
+export type EmailAuthResult = {
+  /** True after sign-up / verify; false after sign-in. */
+  needsName: boolean;
+};
+
 type EmailAuthPanelProps = {
   busy: boolean;
   setBusy: (busy: boolean) => void;
-  onAuthenticated: () => Promise<void>;
+  onAuthenticated: (result: EmailAuthResult) => Promise<void>;
   onError: (message: string | null) => void;
 };
 
@@ -23,7 +28,6 @@ export function EmailAuthPanel({
   onError,
 }: EmailAuthPanelProps) {
   const [mode, setMode] = useState<Mode>("sign-in");
-  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -47,7 +51,7 @@ export function EmailAuthPanel({
         email: email.trim(),
         password,
       });
-      await onAuthenticated();
+      await onAuthenticated({ needsName: false });
     } catch (err) {
       onError(err instanceof Error ? err.message : "Sign in failed");
     } finally {
@@ -69,8 +73,7 @@ export function EmailAuthPanel({
     }
     setBusy(true);
     try {
-      const name =
-        displayName.trim() || email.trim().split("@")[0] || "User";
+      const name = email.trim().split("@")[0] || "User";
       const { needsVerification } = await neonSignUpEmail({
         email: email.trim(),
         password,
@@ -78,7 +81,7 @@ export function EmailAuthPanel({
       });
       const session = await getNeonSession();
       if (session) {
-        await onAuthenticated();
+        await onAuthenticated({ needsName: true });
       } else if (needsVerification) {
         setInfo(
           "Check your email for a verification code (expires in ~15 minutes).",
@@ -107,7 +110,7 @@ export function EmailAuthPanel({
         email: email.trim(),
         otp: otp.trim(),
       });
-      await onAuthenticated();
+      await onAuthenticated({ needsName: true });
     } catch (err) {
       onError(err instanceof Error ? err.message : "Verification failed");
     } finally {
@@ -174,17 +177,6 @@ export function EmailAuthPanel({
       className="bootstrap-form email-auth"
       onSubmit={mode === "sign-up" ? onSignUp : onSignIn}
     >
-      {mode === "sign-up" && (
-        <label>
-          Display name
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Alex"
-            autoComplete="nickname"
-          />
-        </label>
-      )}
       <label>
         Email
         <input
