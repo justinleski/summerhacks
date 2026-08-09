@@ -50,10 +50,10 @@ Human-readable product and engineering docs. Agent-oriented YAML specs live unde
 
 | Doc | Contents |
 | --- | --- |
-| [memories/overview.md](memories/overview.md) | 24h window, submit/lock rules, expiry |
+| [memories/overview.md](memories/overview.md) | Album interior: 24h collaborative songs/photos, lock at window end |
 | [memories/architecture.md](memories/architecture.md) | Lifecycle, visibility, receipt + strips + playlist |
 | [memories/api.md](memories/api.md) | Memories, Spotify, cron sweeper |
-| [memories/data-model.md](memories/data-model.md) | Six tables + verify SQL |
+| [memories/data-model.md](memories/data-model.md) | `memories*` tables + session join to covers |
 
 Agent copy: [`.context/features/*/BRIEFING.md`](../.context/) · [spec.yaml](../.context/)
 

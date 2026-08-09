@@ -40,11 +40,8 @@ function assertOpen(access: StoredMemoryAccess): void {
   if (access.memory.status !== "open") {
     throw routeError("This memory is no longer open", 409);
   }
-}
-
-function assertNotSubmitted(access: StoredMemoryAccess): void {
-  if (access.submitted) {
-    throw routeError("You already submitted — edits are locked", 409);
+  if (Date.now() >= access.memory.windowExpiresAt.getTime()) {
+    throw routeError("Album edit window has ended", 409);
   }
 }
 
@@ -117,7 +114,6 @@ memoriesRoutes.post("/:id/photos", async (c) => {
   try {
     const access = await requireMemberAccess(memoryId, userId);
     assertOpen(access);
-    assertNotSubmitted(access);
     if (access.photoCount >= MEMORY_MAX_PHOTOS_PER_USER) {
       throw routeError(
         `You can add at most ${MEMORY_MAX_PHOTOS_PER_USER} photos`,
@@ -157,7 +153,6 @@ memoriesRoutes.delete("/:id/photos/:photoId", async (c) => {
   try {
     const access = await requireMemberAccess(memoryId, userId);
     assertOpen(access);
-    assertNotSubmitted(access);
 
     const removed = await getStore().deleteMemoryPhoto(
       memoryId,
@@ -179,7 +174,6 @@ memoriesRoutes.put("/:id/songs/:position", async (c) => {
     const position = parsePosition(c.req.param("position"));
     const access = await requireMemberAccess(memoryId, userId);
     assertOpen(access);
-    assertNotSubmitted(access);
 
     const trackId = parseSpotifyTrackId(body.spotifyUrl);
     if (!trackId) {
@@ -209,7 +203,6 @@ memoriesRoutes.delete("/:id/songs/:position", async (c) => {
     const position = parsePosition(c.req.param("position"));
     const access = await requireMemberAccess(memoryId, userId);
     assertOpen(access);
-    assertNotSubmitted(access);
 
     const removed = await getStore().deleteMemorySong(
       memoryId,
@@ -223,7 +216,7 @@ memoriesRoutes.delete("/:id/songs/:position", async (c) => {
   }
 });
 
-/** Shared note — any member may write until the memory locks, last write wins. */
+/** Shared note — any member may write until the window ends, last write wins. */
 memoriesRoutes.patch("/:id/note", async (c) => {
   const memoryId = c.req.param("id");
   const userId = c.get("userId");
@@ -241,28 +234,18 @@ memoriesRoutes.patch("/:id/note", async (c) => {
   }
 });
 
+/** Soft "I'm done" — does not lock; album locks when the 24h window ends. */
 memoriesRoutes.post("/:id/submit", async (c) => {
   const memoryId = c.req.param("id");
   const userId = c.get("userId");
   submitMemoryBodySchema.parse(await c.req.json());
 
-  let locked = false;
-  let memberUserIds: string[] = [];
   try {
-    await requireMemberAccess(memoryId, userId);
-    const result = await getStore().submitMemory(memoryId, userId);
-    locked = result.locked;
-    memberUserIds = result.memberUserIds;
+    const access = await requireMemberAccess(memoryId, userId);
+    assertOpen(access);
+    await getStore().submitMemory(memoryId, userId);
   } catch (err) {
     return httpErrorFromStore(c, err);
-  }
-
-  // Awaited so it actually runs (a serverless function can freeze right after
-  // responding). Deliberately outside the try above: this must never turn a
-  // successful submit into an error response, so it swallows its own failures
-  // and members left without a playlist use the manual button on the detail page.
-  if (locked) {
-    await exportPlaylistsOnLock(memoryId, memberUserIds);
   }
 
   const memory = await getStore().getMemoryById(memoryId, userId);

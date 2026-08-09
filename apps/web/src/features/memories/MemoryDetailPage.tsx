@@ -77,9 +77,9 @@ export function MemoryDetailPage() {
   if (stillOpenSessionId) {
     return (
       <main className="page">
-        <p className="lede">This memory is still open.</p>
+        <p className="lede">This album is still open for edits.</p>
         <Link className="primary" to={`/memories/session/${stillOpenSessionId}`}>
-          Add photos + songs
+          Edit photos + songs
         </Link>
       </main>
     );
@@ -90,7 +90,7 @@ export function MemoryDetailPage() {
       <main className="page">
         <p className="error">{error}</p>
         <Link className="text-link" to="/memories">
-          ← All memories
+          ← All albums
         </Link>
       </main>
     );
@@ -99,15 +99,19 @@ export function MemoryDetailPage() {
   if (!memory) {
     return (
       <main className="page">
-        <p>Loading memory…</p>
+        <p>Loading receipt…</p>
       </main>
     );
   }
 
   return (
     <main className="page memory-detail-page">
-      <p className="eyebrow">Memory</p>
+      <p className="eyebrow">Album receipt</p>
       <h1>{memory.members.map((m) => m.displayName).join(" & ")}</h1>
+      <p className="muted">
+        Locked album interior — cover lives on the session; receipt, photobooth,
+        and playlist below.
+      </p>
 
       {error && <p className="error">{error}</p>}
 
@@ -153,8 +157,11 @@ export function MemoryDetailPage() {
         </p>
       </section>
 
+      <Link className="text-link" to={`/session/${memory.sessionId}`}>
+        ← Back to session
+      </Link>
       <Link className="text-link" to="/memories">
-        ← All memories
+        ← All albums
       </Link>
     </main>
   );

@@ -24,11 +24,11 @@ Machine-oriented feature specs for AI agents. Prefer these over scanning the who
 ## One-line models
 
 - **Bump:** Gesture on client; match + session on server (Neon). Time ±2s + IP geo.
-- **Album:** Per-member covers on a bump session; vote or spin; Neon durable pixels; 24h edit window.
+- **Album:** Per-member pixel covers + shared receipt interior (songs/photos); 24h collaborative edit; vote/spin for cover.
 - **Friends:** Friend code → inbox Accept/Reject; follow = friendship.
 - **Calendar:** Friends-only events + FOAF attendance; activity fan-out; optional Blob images.
 - **Profile:** Bio + pixel avatar (Blob) + client theme + logout.
-- **Memories:** 24h window per bump session; all members submit 3 songs + even photos; last submit locks → receipt, photobooth strips, Spotify playlist.
+- **Memories:** Album receipt interior — collaborative songs/photos for 24h; lock at window end → receipt, photobooth, Spotify playlist.
 
 ## Local vs Preview DB (agents)
 

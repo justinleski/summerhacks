@@ -3,7 +3,6 @@ import {
   BUMP_CANDIDATE_WINDOW_MS,
   MATCH_TIME_WINDOW_MS,
   MEMORY_SONGS_PER_USER,
-  MEMORY_WINDOW_MS,
   emptyPixelGrid,
   isValidMemoryPhotoCount,
   type ActivityNotification,
@@ -27,6 +26,7 @@ import type {
   CreateEventInput,
   ExpiredMemory,
   InboxFriendRequest,
+  LockedMemorySweep,
   StoredAlbum,
   StoredAlbumContest,
   StoredAlbumVote,
@@ -39,9 +39,15 @@ import type {
   StoredSpotifyConnection,
   StoredUser,
   Store,
+  SweepMemoriesResult,
   UpdateAlbumInput,
 } from "./types.js";
-import { freshAlbumForMember, orderedFriendshipPair, toIso } from "./types.js";
+import {
+  albumEditWindowMs,
+  freshAlbumForMember,
+  orderedFriendshipPair,
+  toIso,
+} from "./types.js";
 
 function storeError(message: string, status: number): Error {
   const err = new Error(message);
@@ -547,7 +553,7 @@ export function createMemoryStore(): Store {
     });
   }
 
-  /** Draft while open (own contributions only), full reveal once locked. */
+  /** Collaborative draft while open; full reveal once locked. */
   function shapeMemory(
     memory: StoredMemory,
     viewerUserId: string,
@@ -581,13 +587,17 @@ export function createMemoryStore(): Store {
       };
     }
 
+    const photos = memoryPhotoRows(memory.id).map(toMemoryPhoto);
+    const songs = memorySongRows(memory.id).map(toMemorySong);
     return {
       ...base,
       status: "open",
       lockedAt: null,
       mySubmitted: submittedUserIds(memory.id).has(viewerUserId),
-      myPhotos: memoryPhotoRows(memory.id, viewerUserId).map(toMemoryPhoto),
-      mySongs: memorySongRows(memory.id, viewerUserId).map(toMemorySong),
+      photos,
+      songs,
+      myPhotos: photos.filter((p) => p.userId === viewerUserId),
+      mySongs: songs.filter((s) => s.userId === viewerUserId),
     };
   }
 
@@ -605,7 +615,9 @@ export function createMemoryStore(): Store {
       status: "open",
       note: null,
       windowStartsAt: sessionCreatedAt,
-      windowExpiresAt: new Date(sessionCreatedAt.getTime() + MEMORY_WINDOW_MS),
+      windowExpiresAt: new Date(
+        sessionCreatedAt.getTime() + albumEditWindowMs(),
+      ),
       lockedAt: null,
       createdAt: new Date(),
     };
@@ -623,13 +635,7 @@ export function createMemoryStore(): Store {
     return memory;
   }
 
-  /** Shared by submit + sweeper: lock when every session member has submitted. */
-  function lockIfAllSubmitted(memory: StoredMemory, at: Date): StoredMemory {
-    const memberIds = memoryMemberIds(memory.sessionId);
-    const submitted = submittedUserIds(memory.id);
-    const allSubmitted =
-      memberIds.length > 0 && memberIds.every((uid) => submitted.has(uid));
-    if (!allSubmitted) return memory;
+  function lockMemory(memory: StoredMemory, at: Date): StoredMemory {
     const locked: StoredMemory = { ...memory, status: "locked", lockedAt: at };
     memories.set(memory.id, locked);
     return locked;
@@ -1591,16 +1597,13 @@ export function createMemoryStore(): Store {
       if (!memberUserIds.includes(userId)) {
         throw storeError("Not a member of this memory", 403);
       }
-      if (submittedUserIds(memoryId).has(userId)) {
-        throw storeError("You already submitted", 409);
-      }
 
       const positions = new Set(
         memorySongRows(memoryId, userId).map((s) => s.position),
       );
       if (positions.size !== MEMORY_SONGS_PER_USER) {
         throw storeError(
-          `Add ${MEMORY_SONGS_PER_USER} songs before submitting`,
+          `Add ${MEMORY_SONGS_PER_USER} songs before marking done`,
           400,
         );
       }
@@ -1618,32 +1621,39 @@ export function createMemoryStore(): Store {
         createdAt: memorySubmissions.get(key)?.createdAt ?? now,
       });
 
-      const updated = lockIfAllSubmitted(memory, now);
       return {
-        memory: updated,
-        locked: updated.status === "locked",
+        memory,
+        locked: false,
         memberUserIds,
       };
     },
 
-    async expireStaleMemories() {
+    async expireStaleMemories(): Promise<SweepMemoriesResult> {
       const now = new Date();
+      const locked: LockedMemorySweep[] = [];
       const expired: ExpiredMemory[] = [];
       for (const memory of [...memories.values()]) {
         if (memory.status !== "open") continue;
         if (memory.windowExpiresAt.getTime() > now.getTime()) continue;
 
-        // Everyone submitted right at the boundary — lock instead of discard.
-        if (lockIfAllSubmitted(memory, now).status === "locked") continue;
+        const photos = memoryPhotoRows(memory.id);
+        const songs = memorySongRows(memory.id);
+        const memberUserIds = memoryMemberIds(memory.sessionId);
+
+        if (photos.length > 0 || songs.length > 0) {
+          lockMemory(memory, now);
+          locked.push({ memoryId: memory.id, memberUserIds });
+          continue;
+        }
 
         memories.set(memory.id, { ...memory, status: "expired" });
         expired.push({
           memoryId: memory.id,
           sessionId: memory.sessionId,
-          photoUrls: memoryPhotoRows(memory.id).map((p) => p.photoUrl),
+          photoUrls: [],
         });
       }
-      return expired;
+      return { locked, expired };
     },
 
     async getSpotifyConnection(userId) {

@@ -328,8 +328,13 @@ export type StoredMemoryAccess = {
 
 export type SubmitMemoryResult = {
   memory: StoredMemory;
-  /** True when this submission was the one that locked the memory. */
+  /** Always false — lock only happens at window end via the sweeper. */
   locked: boolean;
+  memberUserIds: string[];
+};
+
+export type LockedMemorySweep = {
+  memoryId: string;
   memberUserIds: string[];
 };
 
@@ -337,6 +342,11 @@ export type ExpiredMemory = {
   memoryId: string;
   sessionId: string;
   photoUrls: string[];
+};
+
+export type SweepMemoriesResult = {
+  locked: LockedMemorySweep[];
+  expired: ExpiredMemory[];
 };
 
 export type StoredSpotifyConnection = {
@@ -516,8 +526,11 @@ export interface Store {
     note: string | null,
   ): Promise<StoredMemory | null>;
   submitMemory(memoryId: string, userId: string): Promise<SubmitMemoryResult>;
-  /** Locks fully-submitted stale memories, expires the rest. Returns expired ones. */
-  expireStaleMemories(): Promise<ExpiredMemory[]>;
+  /**
+   * Past window: lock memories that have any photos/songs (playlist export),
+   * expire empty ones (blob cleanup).
+   */
+  expireStaleMemories(): Promise<SweepMemoriesResult>;
 
   // Spotify
   getSpotifyConnection(userId: string): Promise<StoredSpotifyConnection | null>;

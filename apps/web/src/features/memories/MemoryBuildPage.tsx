@@ -44,17 +44,15 @@ export function MemoryBuildPage() {
       return;
     }
     setMemory(res.memory);
-    // Don't clobber what the user is mid-way through typing.
     if (!noteDirtyRef.current) setNote(res.memory.note ?? "");
   }, [sessionId, navigate]);
 
   useEffect(() => {
     load().catch((err) =>
-      setError(err instanceof Error ? err.message : "Failed to load memory"),
+      setError(err instanceof Error ? err.message : "Failed to load album"),
     );
   }, [load]);
 
-  // Poll so a peer's submit (and the resulting lock) shows up without a refresh.
   useEffect(() => {
     const timer = window.setInterval(() => {
       load().catch(() => undefined);
@@ -119,7 +117,6 @@ export function MemoryBuildPage() {
         { method: "PUT", body: JSON.stringify({ spotifyUrl }) },
       );
       setSongDrafts((prev) => ({ ...prev, [position]: "" }));
-      // Optimistic: drop the resolved song in before the next poll lands.
       setMemory((prev) =>
         prev
           ? {
@@ -128,6 +125,13 @@ export function MemoryBuildPage() {
                 ...prev.mySongs.filter((s) => s.position !== position),
                 res.song,
               ].sort((a, b) => a.position - b.position),
+              songs: [
+                ...prev.songs.filter(
+                  (s) =>
+                    !(s.userId === res.song.userId && s.position === position),
+                ),
+                res.song,
+              ],
             }
           : prev,
       );
@@ -157,7 +161,7 @@ export function MemoryBuildPage() {
     }, "Could not save the note");
   }
 
-  async function submit() {
+  async function markDone() {
     if (!memory) return;
     setConfirming(false);
     await withBusy(async () => {
@@ -169,8 +173,8 @@ export function MemoryBuildPage() {
         navigate(`/memories/${res.memory.id}`, { replace: true });
         return;
       }
-      setMemory(res.memory);
-    }, "Submit failed");
+      if (res.memory.status === "open") setMemory(res.memory);
+    }, "Could not mark done");
   }
 
   async function connectSpotify() {
@@ -194,7 +198,7 @@ export function MemoryBuildPage() {
   if (!memory) {
     return (
       <main className="page">
-        <p>Loading memory…</p>
+        <p>Loading album…</p>
       </main>
     );
   }
@@ -204,65 +208,32 @@ export function MemoryBuildPage() {
   const photoCount = memory.myPhotos.length;
   const photosValid = isValidMemoryPhotoCount(photoCount);
   const songsValid = memory.mySongs.length === MEMORY_SONGS_PER_USER;
-  const canSubmit = photosValid && songsValid && !busy;
-  const others = memory.members.filter((m) => !m.isViewer);
-
-  if (memory.mySubmitted) {
-    return (
-      <main className="page memory-build-page">
-        <p className="eyebrow">Memory</p>
-        <h1>Locked in</h1>
-        <p className="lede">
-          Waiting for {joinNames(others.map((m) => m.displayName))}
-        </p>
-        <p className={urgent ? "memory-countdown error" : "memory-countdown"}>
-          {formatCountdown(msLeft)} left
-        </p>
-
-        <section className="stack-section">
-          <ul className="plain-list">
-            {memory.members.map((m) => (
-              <li key={m.userId} className="row-item">
-                <span>
-                  {m.displayName}
-                  {m.isViewer ? " (you)" : ""}
-                </span>
-                <span className="member-meta">
-                  {m.submitted ? "submitted" : "still writing"}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="muted">
-            Everyone's photos and songs stay hidden until the last person
-            submits.
-          </p>
-        </section>
-
-        {error && <p className="error">{error}</p>}
-        <Link className="text-link" to={`/session/${memory.sessionId}`}>
-          ← Back to session
-        </Link>
-      </main>
-    );
-  }
+  const canMarkDone = photosValid && songsValid && !busy;
+  const peerPhotos = memory.photos.filter((p) => !memory.myPhotos.some((m) => m.id === p.id));
+  const peerSongs = memory.songs.filter(
+    (s) => !memory.mySongs.some((m) => m.id === s.id),
+  );
+  const nameByUser = new Map(
+    memory.members.map((m) => [m.userId, m.displayName] as const),
+  );
 
   return (
     <main className="page memory-build-page">
-      <p className="eyebrow">Memory</p>
-      <h1>Build the memory</h1>
+      <p className="eyebrow">Album interior</p>
+      <h1>Photos & songs</h1>
       <p className={urgent ? "memory-countdown error" : "memory-countdown"}>
-        {formatCountdown(msLeft)} until this closes
+        {formatCountdown(msLeft)} left to edit
       </p>
       <p className="lede">
-        3 songs and photos in pairs from everyone. Nobody sees anyone else's
-        picks until the last person submits.
+        Both of you can add and change songs and photos for 24 hours after the
+        bump. Everything locks when the window ends — the receipt uses this
+        content with your pixel cover.
       </p>
 
       {error && <p className="error">{error}</p>}
 
       <section className="stack-section">
-        <h2>Who's in</h2>
+        <h2>Who&apos;s in</h2>
         <ul className="memory-members">
           {memory.members.map((m) => (
             <li key={m.userId}>
@@ -287,7 +258,7 @@ export function MemoryBuildPage() {
               />
               <span className="member-meta">
                 {m.submitted
-                  ? "submitted"
+                  ? "marked done"
                   : m.isViewer
                     ? "still editing"
                     : "still writing"}
@@ -299,13 +270,13 @@ export function MemoryBuildPage() {
 
       <section className="stack-section">
         <div className="section-head">
-          <h2>Photos</h2>
+          <h2>Your photos</h2>
           <span className={photosValid ? "member-meta" : "error"}>
             {photoCount}/{MEMORY_MAX_PHOTOS_PER_USER}
             {photosValid ? " · ready" : " · need an even number"}
           </span>
         </div>
-        <p className="muted">Add photos in pairs (2, 4, 6, or 8).</p>
+        <p className="muted">Add photos in pairs (2, 4, 6, or 8). Compressed before upload.</p>
         <div className="photo-grid">
           {memory.myPhotos.map((photo) => (
             <div className="photo-grid__item" key={photo.id}>
@@ -341,9 +312,25 @@ export function MemoryBuildPage() {
         </div>
       </section>
 
+      {peerPhotos.length > 0 && (
+        <section className="stack-section">
+          <h2>Their photos</h2>
+          <div className="photo-grid">
+            {peerPhotos.map((photo) => (
+              <div className="photo-grid__item" key={photo.id}>
+                <img src={photo.photoUrl} alt="" loading="lazy" />
+                <span className="member-meta photo-grid__caption">
+                  {nameByUser.get(photo.userId) ?? "Peer"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="stack-section">
         <div className="section-head">
-          <h2>Songs</h2>
+          <h2>Your songs</h2>
           <span className={songsValid ? "member-meta" : "error"}>
             {memory.mySongs.length}/{MEMORY_SONGS_PER_USER}
           </span>
@@ -422,6 +409,43 @@ export function MemoryBuildPage() {
         </div>
       </section>
 
+      {peerSongs.length > 0 && (
+        <section className="stack-section">
+          <h2>Their songs</h2>
+          <div className="song-slots">
+            {peerSongs
+              .slice()
+              .sort(
+                (a, b) =>
+                  a.userId.localeCompare(b.userId) || a.position - b.position,
+              )
+              .map((song) => (
+                <div className="song-slot song-slot--filled" key={song.id}>
+                  {song.albumArtUrl ? (
+                    <img
+                      className="song-slot__art"
+                      src={song.albumArtUrl}
+                      alt=""
+                    />
+                  ) : (
+                    <span
+                      className="song-slot__art song-slot__art--empty"
+                      aria-hidden
+                    />
+                  )}
+                  <span className="song-slot__meta">
+                    <strong>{song.trackTitle}</strong>
+                    <span className="member-meta">
+                      {song.artistName} ·{" "}
+                      {nameByUser.get(song.userId) ?? "Peer"}
+                    </span>
+                  </span>
+                </div>
+              ))}
+          </div>
+        </section>
+      )}
+
       <section className="stack-section">
         <div className="section-head">
           <h2>Shared note</h2>
@@ -429,7 +453,7 @@ export function MemoryBuildPage() {
             {note.length}/{MEMORY_NOTE_MAX}
           </span>
         </div>
-        <p className="muted">Anyone in this memory can edit it until it locks.</p>
+        <p className="muted">Anyone can edit until the 24h window ends.</p>
         <textarea
           value={note}
           maxLength={MEMORY_NOTE_MAX}
@@ -445,7 +469,9 @@ export function MemoryBuildPage() {
 
       <section className="stack-section">
         {spotify?.connected ? (
-          <p className="muted">Spotify connected — your playlist saves on lock.</p>
+          <p className="muted">
+            Spotify connected — playlists export when the album locks.
+          </p>
         ) : (
           <div className="spotify-banner">
             <p>Want the playlist saved to your Spotify?</p>
@@ -463,35 +489,41 @@ export function MemoryBuildPage() {
 
       <div className="submit-bar">
         <span className="member-meta">
-          {songsValid && photosValid
-            ? "Ready to lock in"
-            : `Need ${MEMORY_SONGS_PER_USER} songs and an even photo count`}
+          {memory.mySubmitted
+            ? `Marked done — you can still edit until ${formatCountdown(msLeft)} left`
+            : songsValid && photosValid
+              ? "Optional: mark yourself done"
+              : `Need ${MEMORY_SONGS_PER_USER} songs and an even photo count`}
         </span>
         <button
           type="button"
           className="primary"
-          disabled={!canSubmit}
+          disabled={!canMarkDone || memory.mySubmitted}
           onClick={() => setConfirming(true)}
         >
-          Submit
+          {memory.mySubmitted ? "Done" : "Mark done"}
         </button>
       </div>
 
       {confirming && (
         <div className="memory-modal" role="dialog" aria-modal="true">
           <div className="memory-modal__card">
-            <h2>Lock your submission?</h2>
+            <h2>Mark yourself done?</h2>
             <p className="muted">
-              This locks your submission. You can't edit after.
+              This tells {joinNames(
+                memory.members.filter((m) => !m.isViewer).map((m) => m.displayName),
+              )}{" "}
+              you&apos;re finished — you can still edit until the 24h window
+              ends.
             </p>
             <div className="row-actions">
               <button
                 type="button"
                 className="primary"
                 disabled={busy}
-                onClick={() => void submit()}
+                onClick={() => void markDone()}
               >
-                Yes, submit
+                Mark done
               </button>
               <button
                 type="button"

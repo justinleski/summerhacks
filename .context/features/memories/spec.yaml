@@ -1,38 +1,38 @@
 id: memories
-version: 0.1.0
+version: 0.2.0
 name: Memories
 status: implemented
 summary: >
-  Per-bump-session collaborative keepsake. A 24h window opens at bump match;
-  every session member contributes 3 Spotify tracks, photos in pairs, and an
-  optional shared note. The last submit locks the memory and reveals a
-  Receiptify-style receipt, photobooth strips, and per-member Spotify playlists.
+  Album receipt interior for a bump session. Same 24h window as pixel covers.
+  Members collaboratively add Spotify tracks, photos (pairs), and a shared note.
+  Hard-locks at window end into receipt, photobooth strips, and playlists.
+  Soft "mark done" does not lock.
 
 goals:
-  - Memory row created inside tryMatchBump, before the client polls
-  - Server-authoritative 24h window from sessions.created_at
-  - Per-member submit locks that member permanently (no unlock)
-  - BeReal-style reveal — peer content never serialized pre-lock
-  - Lock the instant the last member submits
-  - Expire (and delete Blob photos) when the window closes with anyone missing
-  - Receipt + photobooth strips + private per-member Spotify playlist
-  - N-generic throughout (loops session_members, no hardcoded pairs)
+  - Memory row created in pairBumps/tryMatchBump before client polls
+  - Window aligned with album covers (albumEditWindowMs / ALBUM_EDIT_WINDOW_MS)
+  - Collaborative visibility while open (all photos/songs serialized)
+  - Soft submit = marked done only; edits until window end
+  - Lock at window end when content exists; expire empty
+  - Client JPEG compress before Blob upload
+  - Receipt + photobooth + per-member Spotify playlist
+  - N-generic (loop session_members)
 
 non_goals:
   - Memories on calendar events (bump-only)
-  - Retrofitting memories onto pre-feature sessions
-  - Public links, feeds, or shareable URLs
-  - Collaborative/shared playlists
-  - Spotify search UI (paste a track link only)
-  - WebSockets or push (polls like bump)
+  - Retrofitting pre-feature sessions
+  - Public links / feeds
+  - Shared collaborative Spotify playlists
+  - Spotify search UI (paste link only)
+  - WebSockets
 
 constraints:
   auth: requireAuth + session_members membership (403 otherwise)
-  window_ms: 86400000
+  window_ms: ALBUM_EDIT_WINDOW_MS (default 86400000)
   songs_per_user: 3
   photos_per_user: 2 | 4 | 6 | 8 (even, max 8)
   note_max: 140
-  image_cap: ~4MB, jpeg/png/webp/gif
+  image_cap: ~4MB server; client compress ~1600px JPEG ~0.72
   blob_path: memories/{sessionId}/{userId}/{ts}.{ext}
   delivery: poll (MEMORY_POLL_INTERVAL_MS = 2000)
   photobooth_slots_per_strip: 4
@@ -44,6 +44,7 @@ data_model:
   - memory_songs
   - memory_playlists
   - spotify_connections
+  related: albums / album_votes / album_contests via session_id
 
 apis:
   - method: GET
@@ -85,7 +86,9 @@ ux:
     - /memories/:id
     - /memories/session/:sessionId
   home_nav: Memories
-  session_cta: /session/:id shows countdown + "Add photos + songs", or "View memory" once locked
+  session_cta: >
+    /session/:id shows cover contest + "Edit photos + songs" countdown,
+    or "View receipt" once locked
 
 ops:
   env:
@@ -94,6 +97,7 @@ ops:
     - SPOTIFY_REDIRECT_URI
     - CRON_SECRET
     - BLOB_READ_WRITE_TOKEN
+    - ALBUM_EDIT_WINDOW_MS
   cron: vercel.json crons → /api/internal/sweep-memories every 15 min (GET)
   schema: npm run db:push -w @summerhacks/api
   degradation: >
@@ -105,5 +109,5 @@ related_docs:
   - docs/memories/architecture.md
   - docs/memories/api.md
   - docs/memories/data-model.md
+  - docs/album/overview.md
   - docs/deploy-vercel.md
-  - .context/features/memories/BRIEFING.md

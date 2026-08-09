@@ -412,9 +412,10 @@ export const coverVoteBodySchema = z.object({
 });
 export type CoverVoteBody = z.infer<typeof coverVoteBodySchema>;
 
-// --- Memories ---
+// --- Memories (album receipt interior: songs + photos + note) ---
 
-export const MEMORY_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Same window as album covers — alias of ALBUM_EDIT_WINDOW_MS. */
+export const MEMORY_WINDOW_MS = ALBUM_EDIT_WINDOW_MS;
 export const MEMORY_MAX_PHOTOS_PER_USER = 8;
 export const MEMORY_MIN_PHOTOS_PER_USER = 2;
 export const MEMORY_SONGS_PER_USER = 3;
@@ -487,18 +488,24 @@ const memoryBaseShape = {
   members: z.array(memoryMemberSchema),
 };
 
-/** Pre-lock view: only the viewer's own contributions, plus everyone's submitted flag. */
+/**
+ * Open window: collaborative — all members see everyone's photos/songs.
+ * `mySubmitted` is a soft "I'm done" signal; it does not lock edits.
+ */
 export const memoryDraftResponseSchema = z.object({
   ...memoryBaseShape,
   status: z.literal("open"),
   lockedAt: z.null(),
   mySubmitted: z.boolean(),
+  photos: z.array(memoryPhotoSchema),
+  songs: z.array(memorySongSchema),
+  /** Viewer's own contributions (convenience filters of photos/songs). */
   myPhotos: z.array(memoryPhotoSchema),
   mySongs: z.array(memorySongSchema),
 });
 export type MemoryDraftResponse = z.infer<typeof memoryDraftResponseSchema>;
 
-/** Post-lock view: every member's photos and songs are revealed. */
+/** Post-lock view: receipt + playlists; no further edits. */
 export const memoryLockedResponseSchema = z.object({
   ...memoryBaseShape,
   status: z.literal("locked"),
@@ -543,7 +550,7 @@ export const updateMemoryNoteBodySchema = z.object({
 });
 export type UpdateMemoryNoteBody = z.infer<typeof updateMemoryNoteBodySchema>;
 
-/** Submitting is irreversible, so the client must opt in explicitly. */
+/** Soft "I'm done" signal — does not lock the album; window end does. */
 export const submitMemoryBodySchema = z.object({
   confirm: z.literal(true),
 });

@@ -12,6 +12,8 @@ Photo-sharing direction long-term; **MVP is Bump only** (not full feed, not coll
 
 **Canvas / album cover:** each member draws their own cover; reveal → vote → optional spin. Neon durable pixels. No PartyKit. See `.context/features/album/`.
 
+**Album interior (receipt):** same session gets songs + photos (`memories*`) editable collaboratively for 24h, then locks into a receipt. See `.context/features/memories/`.
+
 ---
 
 ## How it works (remember this flow)

@@ -246,7 +246,7 @@ export function SessionView() {
       </section>
 
       <section className="stack-section album-cover-block">
-        <h2>Album covers</h2>
+        <h2>Album cover</h2>
         <p className="muted">
           {phase === "editing" &&
             (mine
@@ -392,10 +392,14 @@ export function SessionView() {
 
       {memory?.status === "open" && !windowClosed && (
         <section className="stack-section memory-cta">
-          <h2>Memory of this hangout</h2>
-          <p className="lede">{formatCountdown(msLeft)} left</p>
+          <h2>Album photos & songs</h2>
+          <p className="lede">{formatCountdown(msLeft)} left to edit</p>
+          <p className="muted">
+            Inside this album: Spotify tracks and photos that become the
+            receipt after the window locks.
+          </p>
           <Link className="primary" to={`/memories/session/${session.id}`}>
-            Add photos + songs
+            Edit photos + songs
           </Link>
           <ul className="plain-list">
             {memory.members.map((m) => (
@@ -405,13 +409,7 @@ export function SessionView() {
                   {m.isViewer ? " (you)" : ""}
                 </span>
                 <span className="member-meta">
-                  {m.isViewer
-                    ? m.submitted
-                      ? "you've submitted"
-                      : "still editing"
-                    : m.submitted
-                      ? "submitted"
-                      : "still writing"}
+                  {m.submitted ? "marked done" : "still editing"}
                 </span>
               </li>
             ))}
@@ -421,20 +419,21 @@ export function SessionView() {
 
       {memory?.status === "locked" && (
         <section className="stack-section memory-cta">
-          <h2>Memory locked</h2>
+          <h2>Album receipt</h2>
+          <p className="muted">Locked — photos, songs, and receipt are final.</p>
           <Link className="primary" to={`/memories/${memory.id}`}>
-            View memory
+            View receipt
           </Link>
         </section>
       )}
 
-      {(!memory || windowClosed) && (
+      {(!memory || (windowClosed && memory.status === "open")) && (
         <section className="stack-section">
-          <h2>Memory</h2>
+          <h2>Album interior</h2>
           <p className="muted">
             {windowClosed
-              ? "Memory window closed."
-              : "No memory for this session."}
+              ? "Edit window ended — receipt locks when the sweeper runs."
+              : "No album interior for this session."}
           </p>
         </section>
       )}

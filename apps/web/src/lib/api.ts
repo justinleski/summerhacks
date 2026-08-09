@@ -120,8 +120,10 @@ export async function uploadMemoryPhoto(
   memoryId: string,
   file: File,
 ): Promise<MemoryPhoto> {
+  const { compressImageForUpload } = await import("./compressImage");
+  const compressed = await compressImageForUpload(file);
   const form = new FormData();
-  form.append("file", file);
+  form.append("file", compressed);
   const res = await api<MemoryPhotoUploadResponse>(
     `/memories/${memoryId}/photos`,
     { method: "POST", body: form },

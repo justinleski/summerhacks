@@ -1,6 +1,7 @@
 import { del } from "@vercel/blob";
 import { Hono } from "hono";
 import { getStore } from "../db/index.js";
+import { exportPlaylistsOnLock } from "../services/memoryPlaylist.js";
 
 export const internalRoutes = new Hono();
 
@@ -30,15 +31,22 @@ async function sweepMemories(c: {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
-  const expired = await getStore().expireStaleMemories();
+  const { locked, expired } = await getStore().expireStaleMemories();
   const token = process.env.BLOB_READ_WRITE_TOKEN;
+
+  // Await playlist export so serverless doesn't freeze mid-flight.
+  for (const item of locked) {
+    try {
+      await exportPlaylistsOnLock(item.memoryId, item.memberUserIds);
+    } catch (err) {
+      console.warn("Playlist export failed for memory", item.memoryId, err);
+    }
+  }
 
   let deletedPhotos = 0;
   if (token) {
     for (const memory of expired) {
       if (memory.photoUrls.length === 0) continue;
-      // Awaited rather than detached: a serverless function can freeze right
-      // after responding, which would silently skip the cleanup.
       try {
         await del(memory.photoUrls, { token });
         deletedPhotos += memory.photoUrls.length;
@@ -48,7 +56,11 @@ async function sweepMemories(c: {
     }
   }
 
-  return c.json({ expired: expired.length, deletedPhotos });
+  return c.json({
+    locked: locked.length,
+    expired: expired.length,
+    deletedPhotos,
+  });
 }
 
 // Vercel Cron invokes with GET; POST is for manual runs with the secret header.

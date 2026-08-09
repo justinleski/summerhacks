@@ -39,7 +39,7 @@ npm run dev
 
 ## Extension points
 
-- `album_items` for photos later.
+- Album interior (songs/photos/receipt) lives in `memories*` tables — see `.context/features/memories/` and `docs/memories/`. Same `session_id` + 24h window as covers.
 - `grid_size` 32 UI when ready.
 
 ## Non-goals

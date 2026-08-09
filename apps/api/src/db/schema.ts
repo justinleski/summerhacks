@@ -298,8 +298,9 @@ export const activityNotifications = pgTable("activity_notifications", {
 });
 
 /**
- * Memories — one per bump session, created the moment the session is created.
- * `window_starts_at` mirrors `sessions.created_at` (the hangout timestamp).
+ * Album receipt interior — one per bump session (covers live in `albums`).
+ * Created with the session; `window_*` matches cover `editable_until`
+ * (`session.created_at` + ALBUM_EDIT_WINDOW_MS). Songs/photos hang off this row.
  */
 export const memories = pgTable("memories", {
   id: uuid("id").primaryKey().defaultRandom(),

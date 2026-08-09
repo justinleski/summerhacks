@@ -17,7 +17,6 @@ import {
   BUMP_CANDIDATE_WINDOW_MS,
   MATCH_TIME_WINDOW_MS,
   MEMORY_SONGS_PER_USER,
-  MEMORY_WINDOW_MS,
   emptyPixelGrid,
   isValidMemoryPhotoCount,
   type ActivityNotification,
@@ -43,6 +42,7 @@ import type {
   CreateEventInput,
   ExpiredMemory,
   InboxFriendRequest,
+  LockedMemorySweep,
   StoredAlbum,
   StoredBumpIntent,
   StoredBumpProposal,
@@ -51,9 +51,15 @@ import type {
   StoredSpotifyConnection,
   StoredUser,
   Store,
+  SweepMemoriesResult,
   UpdateAlbumInput,
 } from "./types.js";
-import { freshAlbumForMember, orderedFriendshipPair, toIso } from "./types.js";
+import {
+  albumEditWindowMs,
+  freshAlbumForMember,
+  orderedFriendshipPair,
+  toIso,
+} from "./types.js";
 import type { StoredAlbumContest, StoredAlbumVote } from "./types.js";
 
 function mapUser(row: typeof schema.users.$inferSelect): StoredUser {
@@ -510,7 +516,7 @@ export function createNeonStore(databaseUrl: string): Store {
     return row ? mapMemory(row) : null;
   }
 
-  /** Draft while open (own contributions only), full reveal once locked. */
+  /** Collaborative draft while open; full reveal once locked. */
   async function shapeMemory(
     memory: StoredMemory,
     viewerUserId: string,
@@ -563,28 +569,24 @@ export function createNeonStore(databaseUrl: string): Store {
       };
     }
 
+    const photos = await loadMemoryPhotos(memory.id);
+    const songs = await loadMemorySongs(memory.id);
     return {
       ...base,
       status: "open",
       lockedAt: null,
       mySubmitted: submitted.has(viewerUserId),
-      myPhotos: await loadMemoryPhotos(memory.id, viewerUserId),
-      mySongs: await loadMemorySongs(memory.id, viewerUserId),
+      photos,
+      songs,
+      myPhotos: photos.filter((p) => p.userId === viewerUserId),
+      mySongs: songs.filter((s) => s.userId === viewerUserId),
     };
   }
 
-  /** Shared by submit + sweeper: lock when every session member has submitted. */
-  async function lockIfAllSubmitted(
+  async function lockMemory(
     memory: StoredMemory,
     at: Date,
   ): Promise<StoredMemory> {
-    const memberRows = await loadSessionMemberUsers(memory.sessionId);
-    const submitted = await submittedUserIdSet(memory.id);
-    const allSubmitted =
-      memberRows.length > 0 &&
-      memberRows.every(({ member }) => submitted.has(member.userId));
-    if (!allSubmitted) return memory;
-
     const [locked] = await db
       .update(schema.memories)
       .set({ status: "locked", lockedAt: at })
@@ -606,7 +608,9 @@ export function createNeonStore(databaseUrl: string): Store {
         sessionId,
         status: "open",
         windowStartsAt: sessionCreatedAt,
-        windowExpiresAt: new Date(sessionCreatedAt.getTime() + MEMORY_WINDOW_MS),
+        windowExpiresAt: new Date(
+          sessionCreatedAt.getTime() + albumEditWindowMs(),
+        ),
       })
       .onConflictDoNothing({ target: schema.memories.sessionId })
       .returning();
@@ -2148,15 +2152,12 @@ export function createNeonStore(databaseUrl: string): Store {
       if (!memberUserIds.includes(userId)) {
         throw storeError("Not a member of this memory", 403);
       }
-      if ((await submittedUserIdSet(memoryId)).has(userId)) {
-        throw storeError("You already submitted", 409);
-      }
 
       const songs = await loadMemorySongs(memoryId, userId);
       const positions = new Set(songs.map((s) => s.position));
       if (positions.size !== MEMORY_SONGS_PER_USER) {
         throw storeError(
-          `Add ${MEMORY_SONGS_PER_USER} songs before submitting`,
+          `Add ${MEMORY_SONGS_PER_USER} songs before marking done`,
           400,
         );
       }
@@ -2177,15 +2178,15 @@ export function createNeonStore(databaseUrl: string): Store {
           set: { submittedAt: now },
         });
 
-      const updated = await lockIfAllSubmitted(memory, now);
+      // Soft signal only — album locks at window end, not on submit.
       return {
-        memory: updated,
-        locked: updated.status === "locked",
+        memory,
+        locked: false,
         memberUserIds,
       };
     },
 
-    async expireStaleMemories() {
+    async expireStaleMemories(): Promise<SweepMemoriesResult> {
       const now = new Date();
       const stale = await db
         .select()
@@ -2197,13 +2198,22 @@ export function createNeonStore(databaseUrl: string): Store {
           ),
         );
 
+      const locked: LockedMemorySweep[] = [];
       const expired: ExpiredMemory[] = [];
       for (const row of stale) {
         const memory = mapMemory(row);
+        const photos = await loadMemoryPhotos(memory.id);
+        const songs = await loadMemorySongs(memory.id);
+        const memberRows = await loadSessionMemberUsers(memory.sessionId);
+        const memberUserIds = memberRows.map(({ member }) => member.userId);
 
-        // Everyone submitted right at the boundary — lock instead of discard.
-        const maybeLocked = await lockIfAllSubmitted(memory, now);
-        if (maybeLocked.status === "locked") continue;
+        if (photos.length > 0 || songs.length > 0) {
+          const updated = await lockMemory(memory, now);
+          if (updated.status === "locked") {
+            locked.push({ memoryId: memory.id, memberUserIds });
+          }
+          continue;
+        }
 
         const [updated] = await db
           .update(schema.memories)
@@ -2217,14 +2227,13 @@ export function createNeonStore(databaseUrl: string): Store {
           .returning();
         if (!updated) continue;
 
-        const photos = await loadMemoryPhotos(memory.id);
         expired.push({
           memoryId: memory.id,
           sessionId: memory.sessionId,
-          photoUrls: photos.map((p) => p.photoUrl),
+          photoUrls: [],
         });
       }
-      return expired;
+      return { locked, expired };
     },
 
     async getSpotifyConnection(userId) {
