@@ -227,6 +227,7 @@ export function HomePage() {
       <nav className="home-nav" aria-label="Primary">
         <Link to="/friends">Friends</Link>
         <Link to="/calendar">Calendar</Link>
+        <Link to="/memories">Memories</Link>
         <Link to="/profile">Profile</Link>
       </nav>
 

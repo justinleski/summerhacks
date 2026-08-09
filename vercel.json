@@ -13,5 +13,11 @@
       "source": "/((?!api(?:/|$)).*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/internal/sweep-memories",
+      "schedule": "*/15 * * * *"
+    }
   ]
 }

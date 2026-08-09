@@ -1,6 +1,6 @@
 # Summerhacks
 
-Photo-sharing experiment with **Bump**, **Friends**, **Calendar**, and **Profile**.
+Photo-sharing experiment with **Bump**, **Friends**, **Calendar**, **Profile**, and **Memories**.
 
 ## Monorepo
 
@@ -48,7 +48,9 @@ If `db:push` fails through the pooler, temporarily use the unpooled URL:
 DATABASE_URL="$DATABASE_URL_UNPOOLED" npm run db:push -w @summerhacks/api
 ```
 
-Optional for event/avatar images: set `BLOB_READ_WRITE_TOKEN` (Vercel Blob). Without it, events and profile still work; image upload routes return 503.
+Optional for event/avatar/memory images: set `BLOB_READ_WRITE_TOKEN` (Vercel Blob). Without it, events and profile still work; image upload routes return 503.
+
+Optional for Memories playlists: set `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`, and `CRON_SECRET`. Without them memories still lock and receipts still render; pasting a song link and exporting a playlist return 503. See [docs/memories/overview.md](docs/memories/overview.md).
 
 `.env` / `.env.local` are gitignored. `.env.example` stays in git (placeholders only).
 
@@ -76,7 +78,7 @@ Full map: [docs/deploy-vercel.md](docs/deploy-vercel.md).
 ## Docs
 
 - [How bump works](docs/bump/overview.md)
-- [Friends](docs/friends/overview.md) · [Calendar](docs/calendar/overview.md) · [Profile](docs/profile/overview.md)
+- [Friends](docs/friends/overview.md) · [Calendar](docs/calendar/overview.md) · [Profile](docs/profile/overview.md) · [Memories](docs/memories/overview.md)
 - [Matching + haptics](docs/bump/matching.md)
 - [Architecture](docs/bump/architecture.md)
 - [API](docs/bump/api.md) · [Data model](docs/bump/data-model.md)

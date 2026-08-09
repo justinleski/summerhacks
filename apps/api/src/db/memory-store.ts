@@ -1,11 +1,18 @@
 import { randomUUID } from "node:crypto";
 import {
   MATCH_TIME_WINDOW_MS,
+  MEMORY_SONGS_PER_USER,
+  MEMORY_WINDOW_MS,
+  isValidMemoryPhotoCount,
   type ActivityNotification,
   type CalendarEvent,
   type EventComment,
   type EventDetail,
   type FriendSummary,
+  type MemoryMember,
+  type MemoryPhoto,
+  type MemoryResponse,
+  type MemorySong,
   type RsvpStatus,
   type Session,
   type SessionPayload,
@@ -14,15 +21,24 @@ import { generateFriendCode, normalizeFriendCode } from "./friend-code.js";
 import type {
   CreateBumpInput,
   CreateEventInput,
+  ExpiredMemory,
   InboxFriendRequest,
   StoredBumpIntent,
   StoredFriendRequest,
+  StoredMemory,
   StoredSession,
   StoredSessionMember,
+  StoredSpotifyConnection,
   StoredUser,
   Store,
 } from "./types.js";
 import { orderedFriendshipPair, toIso } from "./types.js";
+
+function storeError(message: string, status: number): Error {
+  const err = new Error(message);
+  (err as Error & { status: number }).status = status;
+  return err;
+}
 
 function placesMatch(a: StoredBumpIntent, b: StoredBumpIntent): boolean {
   if (a.geoCountry && b.geoCountry && a.geoCountry === b.geoCountry) {
@@ -124,6 +140,43 @@ type StoredActivity = {
   readAt: Date | null;
 };
 
+type StoredMemorySubmission = {
+  memoryId: string;
+  userId: string;
+  submittedAt: Date | null;
+  createdAt: Date;
+};
+
+type StoredMemoryPhoto = {
+  id: string;
+  memoryId: string;
+  userId: string;
+  photoUrl: string;
+  uploadOrder: number;
+  createdAt: Date;
+};
+
+type StoredMemorySong = {
+  id: string;
+  memoryId: string;
+  userId: string;
+  spotifyUrl: string;
+  spotifyTrackId: string;
+  trackTitle: string;
+  artistName: string;
+  albumArtUrl: string | null;
+  position: number;
+  createdAt: Date;
+};
+
+type StoredMemoryPlaylist = {
+  memoryId: string;
+  userId: string;
+  spotifyPlaylistId: string;
+  spotifyPlaylistUrl: string;
+  createdAt: Date;
+};
+
 export function createMemoryStore(): Store {
   const users = new Map<string, StoredUser>();
   const usersByDevice = new Map<string, string>();
@@ -140,6 +193,13 @@ export function createMemoryStore(): Store {
   const comments = new Map<string, StoredComment>();
   const subscriptions = new Set<string>(); // `${eventId}:${userId}`
   const activities = new Map<string, StoredActivity>();
+  const memories = new Map<string, StoredMemory>();
+  const memoryIdBySession = new Map<string, string>();
+  const memorySubmissions = new Map<string, StoredMemorySubmission>(); // `${memoryId}:${userId}`
+  const memoryPhotos = new Map<string, StoredMemoryPhoto>();
+  const memorySongs = new Map<string, StoredMemorySong>(); // `${memoryId}:${userId}:${position}`
+  const memoryPlaylists = new Map<string, StoredMemoryPlaylist>(); // `${memoryId}:${userId}`
+  const spotifyConnections = new Map<string, StoredSpotifyConnection>();
 
   function allocFriendCode(): string {
     for (let i = 0; i < 20; i++) {
@@ -295,6 +355,173 @@ export function createMemoryStore(): Store {
       return expired;
     }
     return bump;
+  }
+
+  /** Session membership is authoritative for who owes a submission (N-safe). */
+  function memoryMemberIds(sessionId: string): string[] {
+    return (membersBySession.get(sessionId) ?? []).map((m) => m.userId);
+  }
+
+  function submittedUserIds(memoryId: string): Set<string> {
+    const ids = new Set<string>();
+    for (const row of memorySubmissions.values()) {
+      if (row.memoryId === memoryId && row.submittedAt) ids.add(row.userId);
+    }
+    return ids;
+  }
+
+  function memoryPhotoRows(
+    memoryId: string,
+    userId?: string,
+  ): StoredMemoryPhoto[] {
+    return [...memoryPhotos.values()]
+      .filter(
+        (p) => p.memoryId === memoryId && (!userId || p.userId === userId),
+      )
+      .sort(
+        (a, b) =>
+          a.userId.localeCompare(b.userId) || a.uploadOrder - b.uploadOrder,
+      );
+  }
+
+  function memorySongRows(
+    memoryId: string,
+    userId?: string,
+  ): StoredMemorySong[] {
+    return [...memorySongs.values()]
+      .filter(
+        (s) => s.memoryId === memoryId && (!userId || s.userId === userId),
+      )
+      .sort(
+        (a, b) => a.userId.localeCompare(b.userId) || a.position - b.position,
+      );
+  }
+
+  function toMemoryPhoto(row: StoredMemoryPhoto): MemoryPhoto {
+    return {
+      id: row.id,
+      userId: row.userId,
+      photoUrl: row.photoUrl,
+      uploadOrder: row.uploadOrder,
+    };
+  }
+
+  function toMemorySong(row: StoredMemorySong): MemorySong {
+    return {
+      id: row.id,
+      userId: row.userId,
+      spotifyUrl: row.spotifyUrl,
+      spotifyTrackId: row.spotifyTrackId,
+      trackTitle: row.trackTitle,
+      artistName: row.artistName,
+      albumArtUrl: row.albumArtUrl,
+      position: row.position,
+    };
+  }
+
+  function memoryMembers(
+    memory: StoredMemory,
+    viewerUserId: string,
+  ): MemoryMember[] {
+    const submitted = submittedUserIds(memory.id);
+    return memoryMemberIds(memory.sessionId).map((uid) => {
+      const u = users.get(uid);
+      return {
+        userId: uid,
+        displayName: u?.displayName ?? "Unknown",
+        avatarUrl: u?.avatarUrl ?? null,
+        submitted: submitted.has(uid),
+        isViewer: uid === viewerUserId,
+      };
+    });
+  }
+
+  /** Draft while open (own contributions only), full reveal once locked. */
+  function shapeMemory(
+    memory: StoredMemory,
+    viewerUserId: string,
+  ): MemoryResponse | null {
+    if (memory.status === "expired") return null;
+
+    const base = {
+      id: memory.id,
+      sessionId: memory.sessionId,
+      note: memory.note,
+      hangoutAt: toIso(memory.windowStartsAt),
+      windowStartsAt: toIso(memory.windowStartsAt),
+      windowExpiresAt: toIso(memory.windowExpiresAt),
+      members: memoryMembers(memory, viewerUserId),
+    };
+
+    if (memory.status === "locked") {
+      const playlist = memoryPlaylists.get(`${memory.id}:${viewerUserId}`);
+      return {
+        ...base,
+        status: "locked",
+        lockedAt: toIso(memory.lockedAt ?? memory.windowExpiresAt),
+        photos: memoryPhotoRows(memory.id).map(toMemoryPhoto),
+        songs: memorySongRows(memory.id).map(toMemorySong),
+        myPlaylist: playlist
+          ? {
+              spotifyPlaylistId: playlist.spotifyPlaylistId,
+              spotifyPlaylistUrl: playlist.spotifyPlaylistUrl,
+            }
+          : null,
+      };
+    }
+
+    return {
+      ...base,
+      status: "open",
+      lockedAt: null,
+      mySubmitted: submittedUserIds(memory.id).has(viewerUserId),
+      myPhotos: memoryPhotoRows(memory.id, viewerUserId).map(toMemoryPhoto),
+      mySongs: memorySongRows(memory.id, viewerUserId).map(toMemorySong),
+    };
+  }
+
+  function seedMemory(
+    sessionId: string,
+    memberUserIds: string[],
+    sessionCreatedAt: Date,
+  ): StoredMemory {
+    const existingId = memoryIdBySession.get(sessionId);
+    if (existingId) return memories.get(existingId)!;
+
+    const memory: StoredMemory = {
+      id: randomUUID(),
+      sessionId,
+      status: "open",
+      note: null,
+      windowStartsAt: sessionCreatedAt,
+      windowExpiresAt: new Date(sessionCreatedAt.getTime() + MEMORY_WINDOW_MS),
+      lockedAt: null,
+      createdAt: new Date(),
+    };
+    memories.set(memory.id, memory);
+    memoryIdBySession.set(sessionId, memory.id);
+
+    for (const userId of memberUserIds) {
+      memorySubmissions.set(`${memory.id}:${userId}`, {
+        memoryId: memory.id,
+        userId,
+        submittedAt: null,
+        createdAt: memory.createdAt,
+      });
+    }
+    return memory;
+  }
+
+  /** Shared by submit + sweeper: lock when every session member has submitted. */
+  function lockIfAllSubmitted(memory: StoredMemory, at: Date): StoredMemory {
+    const memberIds = memoryMemberIds(memory.sessionId);
+    const submitted = submittedUserIds(memory.id);
+    const allSubmitted =
+      memberIds.length > 0 && memberIds.every((uid) => submitted.has(uid));
+    if (!allSubmitted) return memory;
+    const locked: StoredMemory = { ...memory, status: "locked", lockedAt: at };
+    memories.set(memory.id, locked);
+    return locked;
   }
 
   return {
@@ -503,6 +730,16 @@ export function createMemoryStore(): Store {
         },
       ];
       membersBySession.set(session.id, members);
+
+      // Memory row must exist before this call returns so the client can jump
+      // straight to /memories/session/:sessionId without racing.
+      if (session.createdVia === "bump") {
+        seedMemory(
+          session.id,
+          members.map((m) => m.userId),
+          now,
+        );
+      }
 
       const matchedA: StoredBumpIntent = {
         ...bump,
@@ -884,6 +1121,226 @@ export function createMemoryStore(): Store {
         count++;
       }
       return count;
+    },
+
+    async createMemoryForSession(sessionId, memberUserIds, sessionCreatedAt) {
+      return seedMemory(sessionId, memberUserIds, sessionCreatedAt);
+    },
+
+    async getMemoryAccess(memoryId, userId) {
+      const memory = memories.get(memoryId);
+      if (!memory) return null;
+      const memberUserIds = memoryMemberIds(memory.sessionId);
+      return {
+        memory,
+        isMember: memberUserIds.includes(userId),
+        submitted: submittedUserIds(memoryId).has(userId),
+        photoCount: memoryPhotoRows(memoryId, userId).length,
+        songCount: memorySongRows(memoryId, userId).length,
+        memberUserIds,
+      };
+    },
+
+    async getMemoryBySessionId(sessionId, viewerUserId) {
+      const memoryId = memoryIdBySession.get(sessionId);
+      if (!memoryId) return null;
+      const memory = memories.get(memoryId);
+      if (!memory) return null;
+      if (!memoryMemberIds(memory.sessionId).includes(viewerUserId)) return null;
+      return shapeMemory(memory, viewerUserId);
+    },
+
+    async getMemoryById(memoryId, viewerUserId) {
+      const memory = memories.get(memoryId);
+      if (!memory) return null;
+      if (!memoryMemberIds(memory.sessionId).includes(viewerUserId)) return null;
+      return shapeMemory(memory, viewerUserId);
+    },
+
+    async listLockedMemoriesForUser(userId) {
+      const rows = [...memories.values()].filter(
+        (m) =>
+          m.status === "locked" &&
+          memoryMemberIds(m.sessionId).includes(userId),
+      );
+      return rows
+        .sort(
+          (a, b) => b.windowStartsAt.getTime() - a.windowStartsAt.getTime(),
+        )
+        .map((memory) => {
+          const photos = memoryPhotoRows(memory.id);
+          return {
+            id: memory.id,
+            sessionId: memory.sessionId,
+            hangoutAt: toIso(memory.windowStartsAt),
+            lockedAt: toIso(memory.lockedAt ?? memory.windowExpiresAt),
+            memberDisplayNames: memoryMemberIds(memory.sessionId).map(
+              (uid) => users.get(uid)?.displayName ?? "Unknown",
+            ),
+            coverPhotoUrl: photos[0]?.photoUrl ?? null,
+            songCount: memorySongRows(memory.id).length,
+          };
+        });
+    },
+
+    async addMemoryPhoto(memoryId, userId, photoUrl) {
+      const memory = memories.get(memoryId);
+      if (!memory) throw storeError("Memory not found", 404);
+      const mine = memoryPhotoRows(memoryId, userId);
+      const nextOrder =
+        mine.length === 0
+          ? 0
+          : Math.max(...mine.map((p) => p.uploadOrder)) + 1;
+      const row: StoredMemoryPhoto = {
+        id: randomUUID(),
+        memoryId,
+        userId,
+        photoUrl,
+        uploadOrder: nextOrder,
+        createdAt: new Date(),
+      };
+      memoryPhotos.set(row.id, row);
+      return toMemoryPhoto(row);
+    },
+
+    async deleteMemoryPhoto(memoryId, userId, photoId) {
+      const row = memoryPhotos.get(photoId);
+      if (!row || row.memoryId !== memoryId || row.userId !== userId) {
+        return false;
+      }
+      memoryPhotos.delete(photoId);
+      return true;
+    },
+
+    async upsertMemorySong(memoryId, userId, position, input) {
+      const memory = memories.get(memoryId);
+      if (!memory) throw storeError("Memory not found", 404);
+      const key = `${memoryId}:${userId}:${position}`;
+      const existing = memorySongs.get(key);
+      const row: StoredMemorySong = {
+        id: existing?.id ?? randomUUID(),
+        memoryId,
+        userId,
+        spotifyUrl: input.spotifyUrl,
+        spotifyTrackId: input.spotifyTrackId,
+        trackTitle: input.trackTitle,
+        artistName: input.artistName,
+        albumArtUrl: input.albumArtUrl,
+        position,
+        createdAt: existing?.createdAt ?? new Date(),
+      };
+      memorySongs.set(key, row);
+      return toMemorySong(row);
+    },
+
+    async deleteMemorySong(memoryId, userId, position) {
+      return memorySongs.delete(`${memoryId}:${userId}:${position}`);
+    },
+
+    async updateMemoryNote(memoryId, note) {
+      const memory = memories.get(memoryId);
+      if (!memory) return null;
+      const updated: StoredMemory = { ...memory, note };
+      memories.set(memoryId, updated);
+      return updated;
+    },
+
+    async submitMemory(memoryId, userId) {
+      const memory = memories.get(memoryId);
+      if (!memory) throw storeError("Memory not found", 404);
+      if (memory.status !== "open") {
+        throw storeError("Memory is no longer open", 409);
+      }
+      const memberUserIds = memoryMemberIds(memory.sessionId);
+      if (!memberUserIds.includes(userId)) {
+        throw storeError("Not a member of this memory", 403);
+      }
+      if (submittedUserIds(memoryId).has(userId)) {
+        throw storeError("You already submitted", 409);
+      }
+
+      const positions = new Set(
+        memorySongRows(memoryId, userId).map((s) => s.position),
+      );
+      if (positions.size !== MEMORY_SONGS_PER_USER) {
+        throw storeError(
+          `Add ${MEMORY_SONGS_PER_USER} songs before submitting`,
+          400,
+        );
+      }
+      const photoCount = memoryPhotoRows(memoryId, userId).length;
+      if (!isValidMemoryPhotoCount(photoCount)) {
+        throw storeError("Photos must come in pairs (2, 4, 6, or 8)", 400);
+      }
+
+      const now = new Date();
+      const key = `${memoryId}:${userId}`;
+      memorySubmissions.set(key, {
+        memoryId,
+        userId,
+        submittedAt: now,
+        createdAt: memorySubmissions.get(key)?.createdAt ?? now,
+      });
+
+      const updated = lockIfAllSubmitted(memory, now);
+      return {
+        memory: updated,
+        locked: updated.status === "locked",
+        memberUserIds,
+      };
+    },
+
+    async expireStaleMemories() {
+      const now = new Date();
+      const expired: ExpiredMemory[] = [];
+      for (const memory of [...memories.values()]) {
+        if (memory.status !== "open") continue;
+        if (memory.windowExpiresAt.getTime() > now.getTime()) continue;
+
+        // Everyone submitted right at the boundary — lock instead of discard.
+        if (lockIfAllSubmitted(memory, now).status === "locked") continue;
+
+        memories.set(memory.id, { ...memory, status: "expired" });
+        expired.push({
+          memoryId: memory.id,
+          sessionId: memory.sessionId,
+          photoUrls: memoryPhotoRows(memory.id).map((p) => p.photoUrl),
+        });
+      }
+      return expired;
+    },
+
+    async getSpotifyConnection(userId) {
+      return spotifyConnections.get(userId) ?? null;
+    },
+
+    async upsertSpotifyConnection(userId, tokens) {
+      const existing = spotifyConnections.get(userId);
+      const row: StoredSpotifyConnection = {
+        userId,
+        spotifyUserId: tokens.spotifyUserId,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresAt: tokens.expiresAt,
+        createdAt: existing?.createdAt ?? new Date(),
+      };
+      spotifyConnections.set(userId, row);
+      return row;
+    },
+
+    async deleteSpotifyConnection(userId) {
+      return spotifyConnections.delete(userId);
+    },
+
+    async upsertMemoryPlaylist(memoryId, userId, playlistId, playlistUrl) {
+      const key = `${memoryId}:${userId}`;
+      memoryPlaylists.set(key, {
+        memoryId,
+        userId,
+        spotifyPlaylistId: playlistId,
+        spotifyPlaylistUrl: playlistUrl,
+        createdAt: memoryPlaylists.get(key)?.createdAt ?? new Date(),
+      });
     },
   };
 }

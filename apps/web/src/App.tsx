@@ -2,6 +2,9 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { CalendarPage } from "./features/calendar/CalendarPage";
 import { EventDetailPage } from "./features/calendar/EventDetailPage";
 import { FriendsPage } from "./features/friends/FriendsPage";
+import { MemoriesListPage } from "./features/memories/MemoriesListPage";
+import { MemoryBuildPage } from "./features/memories/MemoryBuildPage";
+import { MemoryDetailPage } from "./features/memories/MemoryDetailPage";
 import { ProfilePage } from "./features/profile/ProfilePage";
 import { SessionView } from "./features/session/SessionView";
 import { HomePage } from "./pages/HomePage";
@@ -16,6 +19,12 @@ export function App() {
         <Route path="/events/:id" element={<EventDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/session/:id" element={<SessionView />} />
+        <Route path="/memories" element={<MemoriesListPage />} />
+        <Route
+          path="/memories/session/:sessionId"
+          element={<MemoryBuildPage />}
+        />
+        <Route path="/memories/:id" element={<MemoryDetailPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

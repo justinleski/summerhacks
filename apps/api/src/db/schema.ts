@@ -1,5 +1,6 @@
 import {
   doublePrecision,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
@@ -217,4 +218,120 @@ export const activityNotifications = pgTable("activity_notifications", {
     .notNull()
     .defaultNow(),
   readAt: timestamp("read_at", { withTimezone: true }),
+});
+
+/**
+ * Memories — one per bump session, created the moment the session is created.
+ * `window_starts_at` mirrors `sessions.created_at` (the hangout timestamp).
+ */
+export const memories = pgTable("memories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sessionId: uuid("session_id")
+    .notNull()
+    .references(() => sessions.id, { onDelete: "cascade" })
+    .unique(),
+  /** `open` | `locked` | `expired` */
+  status: text("status").notNull().default("open"),
+  note: text("note"),
+  windowStartsAt: timestamp("window_starts_at", { withTimezone: true }).notNull(),
+  windowExpiresAt: timestamp("window_expires_at", {
+    withTimezone: true,
+  }).notNull(),
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const memorySubmissions = pgTable(
+  "memory_submissions",
+  {
+    memoryId: uuid("memory_id")
+      .notNull()
+      .references(() => memories.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.memoryId, t.userId] })],
+);
+
+export const memoryPhotos = pgTable("memory_photos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  memoryId: uuid("memory_id")
+    .notNull()
+    .references(() => memories.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  photoUrl: text("photo_url").notNull(),
+  uploadOrder: integer("upload_order").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const memorySongs = pgTable(
+  "memory_songs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    memoryId: uuid("memory_id")
+      .notNull()
+      .references(() => memories.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    spotifyUrl: text("spotify_url").notNull(),
+    spotifyTrackId: text("spotify_track_id").notNull(),
+    trackTitle: text("track_title").notNull(),
+    artistName: text("artist_name").notNull(),
+    albumArtUrl: text("album_art_url"),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  // One track per slot per contributor — makes "replace at position" a real upsert.
+  (t) => [
+    uniqueIndex("memory_songs_user_position_idx").on(
+      t.memoryId,
+      t.userId,
+      t.position,
+    ),
+  ],
+);
+
+export const memoryPlaylists = pgTable(
+  "memory_playlists",
+  {
+    memoryId: uuid("memory_id")
+      .notNull()
+      .references(() => memories.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    spotifyPlaylistId: text("spotify_playlist_id").notNull(),
+    spotifyPlaylistUrl: text("spotify_playlist_url").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.memoryId, t.userId] })],
+);
+
+export const spotifyConnections = pgTable("spotify_connections", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  spotifyUserId: text("spotify_user_id").notNull(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });

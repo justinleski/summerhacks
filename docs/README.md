@@ -37,6 +37,15 @@ Human-readable product and engineering docs. Agent-oriented YAML specs live unde
 | [profile/api.md](profile/api.md) | PATCH /users/me + avatar upload |
 | [profile/data-model.md](profile/data-model.md) | `bio` / `avatar_url` |
 
+## Features — Memories
+
+| Doc | Contents |
+| --- | --- |
+| [memories/overview.md](memories/overview.md) | 24h window, submit/lock rules, expiry |
+| [memories/architecture.md](memories/architecture.md) | Lifecycle, visibility, receipt + strips + playlist |
+| [memories/api.md](memories/api.md) | Memories, Spotify, cron sweeper |
+| [memories/data-model.md](memories/data-model.md) | Six tables + verify SQL |
+
 Agent copy: [`.context/features/*/BRIEFING.md`](../.context/) · [spec.yaml](../.context/)
 
 ## Ops

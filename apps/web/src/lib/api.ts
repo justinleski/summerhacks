@@ -1,3 +1,7 @@
+import type {
+  MemoryPhoto,
+  MemoryPhotoUploadResponse,
+} from "@summerhacks/shared";
 import { getNeonAccessToken, neonAuthEnabled } from "./neonAuth";
 
 const TOKEN_KEY = "summerhacks.token";
@@ -100,4 +104,17 @@ export async function uploadAvatar(file: File): Promise<string> {
     body: form,
   });
   return res.url;
+}
+
+export async function uploadMemoryPhoto(
+  memoryId: string,
+  file: File,
+): Promise<MemoryPhoto> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await api<MemoryPhotoUploadResponse>(
+    `/memories/${memoryId}/photos`,
+    { method: "POST", body: form },
+  );
+  return res.photo;
 }

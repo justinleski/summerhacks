@@ -7,7 +7,10 @@ import { bumpsRoutes } from "./routes/bumps.js";
 import { calendarRoutes } from "./routes/calendar.js";
 import { eventsRoutes } from "./routes/events.js";
 import { friendsRoutes } from "./routes/friends.js";
+import { internalRoutes } from "./routes/internal.js";
+import { memoriesRoutes } from "./routes/memories.js";
 import { sessionsRoutes } from "./routes/sessions.js";
+import { spotifyRoutes } from "./routes/spotify.js";
 import { uploadsRoutes } from "./routes/uploads.js";
 import { usersRoutes } from "./routes/users.js";
 
@@ -37,6 +40,9 @@ app.route("/calendar", calendarRoutes);
 app.route("/events", eventsRoutes);
 app.route("/activity", activityRoutes);
 app.route("/uploads", uploadsRoutes);
+app.route("/memories", memoriesRoutes);
+app.route("/spotify", spotifyRoutes);
+app.route("/internal", internalRoutes);
 
 app.onError((err, c) => {
   if (err instanceof ZodError) {

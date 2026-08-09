@@ -1,14 +1,33 @@
 import { randomUUID } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
-import { and, desc, eq, gt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import {
   MATCH_TIME_WINDOW_MS,
+  MEMORY_SONGS_PER_USER,
+  MEMORY_WINDOW_MS,
+  isValidMemoryPhotoCount,
   type ActivityNotification,
   type CalendarEvent,
   type EventComment,
   type EventDetail,
   type FriendSummary,
+  type MemoryListItem,
+  type MemoryMember,
+  type MemoryPhoto,
+  type MemoryResponse,
+  type MemorySong,
   type RsvpStatus,
   type Session,
   type SessionPayload,
@@ -18,9 +37,12 @@ import * as schema from "./schema.js";
 import type {
   CreateBumpInput,
   CreateEventInput,
+  ExpiredMemory,
   InboxFriendRequest,
   StoredBumpIntent,
   StoredFriendRequest,
+  StoredMemory,
+  StoredSpotifyConnection,
   StoredUser,
   Store,
 } from "./types.js";
@@ -58,6 +80,58 @@ function mapBump(row: typeof schema.bumpIntents.$inferSelect): StoredBumpIntent 
     matchedBumpId: row.matchedBumpId,
     sessionId: row.sessionId,
     expiresAt: row.expiresAt,
+  };
+}
+
+function mapMemory(row: typeof schema.memories.$inferSelect): StoredMemory {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    status: row.status as StoredMemory["status"],
+    note: row.note,
+    windowStartsAt: row.windowStartsAt,
+    windowExpiresAt: row.windowExpiresAt,
+    lockedAt: row.lockedAt,
+    createdAt: row.createdAt,
+  };
+}
+
+function mapMemoryPhoto(
+  row: typeof schema.memoryPhotos.$inferSelect,
+): MemoryPhoto {
+  return {
+    id: row.id,
+    userId: row.userId,
+    photoUrl: row.photoUrl,
+    uploadOrder: row.uploadOrder,
+  };
+}
+
+function mapMemorySong(
+  row: typeof schema.memorySongs.$inferSelect,
+): MemorySong {
+  return {
+    id: row.id,
+    userId: row.userId,
+    spotifyUrl: row.spotifyUrl,
+    spotifyTrackId: row.spotifyTrackId,
+    trackTitle: row.trackTitle,
+    artistName: row.artistName,
+    albumArtUrl: row.albumArtUrl,
+    position: row.position,
+  };
+}
+
+function mapSpotifyConnection(
+  row: typeof schema.spotifyConnections.$inferSelect,
+): StoredSpotifyConnection {
+  return {
+    userId: row.userId,
+    spotifyUserId: row.spotifyUserId,
+    accessToken: row.accessToken,
+    refreshToken: row.refreshToken,
+    expiresAt: row.expiresAt,
+    createdAt: row.createdAt,
   };
 }
 
@@ -189,6 +263,205 @@ export function createNeonStore(databaseUrl: string): Store {
         confirmedAt: member.confirmedAt ? toIso(member.confirmedAt) : null,
       })),
     };
+  }
+
+  /** Session membership is authoritative for who owes a submission (N-safe). */
+  async function loadSessionMemberUsers(sessionId: string) {
+    return db
+      .select({ member: schema.sessionMembers, user: schema.users })
+      .from(schema.sessionMembers)
+      .innerJoin(
+        schema.users,
+        eq(schema.sessionMembers.userId, schema.users.id),
+      )
+      .where(eq(schema.sessionMembers.sessionId, sessionId))
+      .orderBy(asc(schema.sessionMembers.userId));
+  }
+
+  async function submittedUserIdSet(memoryId: string): Promise<Set<string>> {
+    const rows = await db
+      .select({ userId: schema.memorySubmissions.userId })
+      .from(schema.memorySubmissions)
+      .where(
+        and(
+          eq(schema.memorySubmissions.memoryId, memoryId),
+          isNotNull(schema.memorySubmissions.submittedAt),
+        ),
+      );
+    return new Set(rows.map((r) => r.userId));
+  }
+
+  async function loadMemoryPhotos(
+    memoryId: string,
+    userId?: string,
+  ): Promise<MemoryPhoto[]> {
+    const rows = await db
+      .select()
+      .from(schema.memoryPhotos)
+      .where(
+        userId
+          ? and(
+              eq(schema.memoryPhotos.memoryId, memoryId),
+              eq(schema.memoryPhotos.userId, userId),
+            )
+          : eq(schema.memoryPhotos.memoryId, memoryId),
+      )
+      .orderBy(
+        asc(schema.memoryPhotos.userId),
+        asc(schema.memoryPhotos.uploadOrder),
+      );
+    return rows.map(mapMemoryPhoto);
+  }
+
+  async function loadMemorySongs(
+    memoryId: string,
+    userId?: string,
+  ): Promise<MemorySong[]> {
+    const rows = await db
+      .select()
+      .from(schema.memorySongs)
+      .where(
+        userId
+          ? and(
+              eq(schema.memorySongs.memoryId, memoryId),
+              eq(schema.memorySongs.userId, userId),
+            )
+          : eq(schema.memorySongs.memoryId, memoryId),
+      )
+      .orderBy(asc(schema.memorySongs.userId), asc(schema.memorySongs.position));
+    return rows.map(mapMemorySong);
+  }
+
+  async function loadMemory(memoryId: string): Promise<StoredMemory | null> {
+    const [row] = await db
+      .select()
+      .from(schema.memories)
+      .where(eq(schema.memories.id, memoryId))
+      .limit(1);
+    return row ? mapMemory(row) : null;
+  }
+
+  /** Draft while open (own contributions only), full reveal once locked. */
+  async function shapeMemory(
+    memory: StoredMemory,
+    viewerUserId: string,
+  ): Promise<MemoryResponse | null> {
+    if (memory.status === "expired") return null;
+
+    const memberRows = await loadSessionMemberUsers(memory.sessionId);
+    const submitted = await submittedUserIdSet(memory.id);
+    const members: MemoryMember[] = memberRows.map(({ member, user }) => ({
+      userId: member.userId,
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl,
+      submitted: submitted.has(member.userId),
+      isViewer: member.userId === viewerUserId,
+    }));
+
+    const base = {
+      id: memory.id,
+      sessionId: memory.sessionId,
+      note: memory.note,
+      hangoutAt: toIso(memory.windowStartsAt),
+      windowStartsAt: toIso(memory.windowStartsAt),
+      windowExpiresAt: toIso(memory.windowExpiresAt),
+      members,
+    };
+
+    if (memory.status === "locked") {
+      const [playlist] = await db
+        .select()
+        .from(schema.memoryPlaylists)
+        .where(
+          and(
+            eq(schema.memoryPlaylists.memoryId, memory.id),
+            eq(schema.memoryPlaylists.userId, viewerUserId),
+          ),
+        )
+        .limit(1);
+      return {
+        ...base,
+        status: "locked",
+        lockedAt: toIso(memory.lockedAt ?? memory.windowExpiresAt),
+        photos: await loadMemoryPhotos(memory.id),
+        songs: await loadMemorySongs(memory.id),
+        myPlaylist: playlist
+          ? {
+              spotifyPlaylistId: playlist.spotifyPlaylistId,
+              spotifyPlaylistUrl: playlist.spotifyPlaylistUrl,
+            }
+          : null,
+      };
+    }
+
+    return {
+      ...base,
+      status: "open",
+      lockedAt: null,
+      mySubmitted: submitted.has(viewerUserId),
+      myPhotos: await loadMemoryPhotos(memory.id, viewerUserId),
+      mySongs: await loadMemorySongs(memory.id, viewerUserId),
+    };
+  }
+
+  /** Shared by submit + sweeper: lock when every session member has submitted. */
+  async function lockIfAllSubmitted(
+    memory: StoredMemory,
+    at: Date,
+  ): Promise<StoredMemory> {
+    const memberRows = await loadSessionMemberUsers(memory.sessionId);
+    const submitted = await submittedUserIdSet(memory.id);
+    const allSubmitted =
+      memberRows.length > 0 &&
+      memberRows.every(({ member }) => submitted.has(member.userId));
+    if (!allSubmitted) return memory;
+
+    const [locked] = await db
+      .update(schema.memories)
+      .set({ status: "locked", lockedAt: at })
+      .where(
+        and(eq(schema.memories.id, memory.id), eq(schema.memories.status, "open")),
+      )
+      .returning();
+    return locked ? mapMemory(locked) : ((await loadMemory(memory.id)) ?? memory);
+  }
+
+  async function seedMemory(
+    sessionId: string,
+    memberUserIds: string[],
+    sessionCreatedAt: Date,
+  ): Promise<StoredMemory> {
+    const [inserted] = await db
+      .insert(schema.memories)
+      .values({
+        sessionId,
+        status: "open",
+        windowStartsAt: sessionCreatedAt,
+        windowExpiresAt: new Date(sessionCreatedAt.getTime() + MEMORY_WINDOW_MS),
+      })
+      .onConflictDoNothing({ target: schema.memories.sessionId })
+      .returning();
+
+    const memory =
+      inserted ??
+      (
+        await db
+          .select()
+          .from(schema.memories)
+          .where(eq(schema.memories.sessionId, sessionId))
+          .limit(1)
+      )[0];
+    if (!memory) throw new Error("Failed to create memory for session");
+
+    if (memberUserIds.length > 0) {
+      await db
+        .insert(schema.memorySubmissions)
+        .values(
+          memberUserIds.map((userId) => ({ memoryId: memory.id, userId })),
+        )
+        .onConflictDoNothing();
+    }
+    return mapMemory(memory);
   }
 
   async function listFriendIds(userId: string): Promise<string[]> {
@@ -591,6 +864,10 @@ export function createNeonStore(databaseUrl: string): Store {
         { sessionId, userId: userA.id, joinedAt: now },
         { sessionId, userId: userB.id, joinedAt: now },
       ]);
+
+      // Memory row must exist before this call returns so the client can jump
+      // straight to /memories/session/:sessionId without racing.
+      await seedMemory(sessionId, [userA.id, userB.id], now);
 
       const [matchedA] = await db
         .update(schema.bumpIntents)
@@ -1166,6 +1443,363 @@ export function createNeonStore(databaseUrl: string): Store {
         )
         .returning();
       return updated.length;
+    },
+
+    async createMemoryForSession(sessionId, memberUserIds, sessionCreatedAt) {
+      return seedMemory(sessionId, memberUserIds, sessionCreatedAt);
+    },
+
+    async getMemoryAccess(memoryId, userId) {
+      const memory = await loadMemory(memoryId);
+      if (!memory) return null;
+
+      const memberRows = await loadSessionMemberUsers(memory.sessionId);
+      const memberUserIds = memberRows.map(({ member }) => member.userId);
+      const submitted = await submittedUserIdSet(memoryId);
+
+      const [photoRow] = await db
+        .select({ value: sql<number>`count(*)::int` })
+        .from(schema.memoryPhotos)
+        .where(
+          and(
+            eq(schema.memoryPhotos.memoryId, memoryId),
+            eq(schema.memoryPhotos.userId, userId),
+          ),
+        );
+      const [songRow] = await db
+        .select({ value: sql<number>`count(*)::int` })
+        .from(schema.memorySongs)
+        .where(
+          and(
+            eq(schema.memorySongs.memoryId, memoryId),
+            eq(schema.memorySongs.userId, userId),
+          ),
+        );
+
+      return {
+        memory,
+        isMember: memberUserIds.includes(userId),
+        submitted: submitted.has(userId),
+        photoCount: photoRow?.value ?? 0,
+        songCount: songRow?.value ?? 0,
+        memberUserIds,
+      };
+    },
+
+    async getMemoryBySessionId(sessionId, viewerUserId) {
+      const [row] = await db
+        .select()
+        .from(schema.memories)
+        .where(eq(schema.memories.sessionId, sessionId))
+        .limit(1);
+      if (!row) return null;
+      const memory = mapMemory(row);
+      const memberRows = await loadSessionMemberUsers(memory.sessionId);
+      if (!memberRows.some(({ member }) => member.userId === viewerUserId)) {
+        return null;
+      }
+      return shapeMemory(memory, viewerUserId);
+    },
+
+    async getMemoryById(memoryId, viewerUserId) {
+      const memory = await loadMemory(memoryId);
+      if (!memory) return null;
+      const memberRows = await loadSessionMemberUsers(memory.sessionId);
+      if (!memberRows.some(({ member }) => member.userId === viewerUserId)) {
+        return null;
+      }
+      return shapeMemory(memory, viewerUserId);
+    },
+
+    async listLockedMemoriesForUser(userId) {
+      const rows = await db
+        .select({ memory: schema.memories })
+        .from(schema.memories)
+        .innerJoin(
+          schema.sessionMembers,
+          eq(schema.memories.sessionId, schema.sessionMembers.sessionId),
+        )
+        .where(
+          and(
+            eq(schema.sessionMembers.userId, userId),
+            eq(schema.memories.status, "locked"),
+          ),
+        )
+        .orderBy(desc(schema.memories.windowStartsAt));
+
+      const result: MemoryListItem[] = [];
+      for (const { memory: row } of rows) {
+        const memory = mapMemory(row);
+        const memberRows = await loadSessionMemberUsers(memory.sessionId);
+
+        // Cover = first frame of the first photobooth strip (interleave index 0).
+        const [cover] = await db
+          .select({ photoUrl: schema.memoryPhotos.photoUrl })
+          .from(schema.memoryPhotos)
+          .where(eq(schema.memoryPhotos.memoryId, memory.id))
+          .orderBy(
+            asc(schema.memoryPhotos.userId),
+            asc(schema.memoryPhotos.uploadOrder),
+          )
+          .limit(1);
+
+        const [songRow] = await db
+          .select({ value: sql<number>`count(*)::int` })
+          .from(schema.memorySongs)
+          .where(eq(schema.memorySongs.memoryId, memory.id));
+
+        result.push({
+          id: memory.id,
+          sessionId: memory.sessionId,
+          hangoutAt: toIso(memory.windowStartsAt),
+          lockedAt: toIso(memory.lockedAt ?? memory.windowExpiresAt),
+          memberDisplayNames: memberRows.map(({ user }) => user.displayName),
+          coverPhotoUrl: cover?.photoUrl ?? null,
+          songCount: songRow?.value ?? 0,
+        });
+      }
+      return result;
+    },
+
+    async addMemoryPhoto(memoryId, userId, photoUrl) {
+      const [maxRow] = await db
+        .select({
+          maxOrder: sql<number | null>`max(${schema.memoryPhotos.uploadOrder})::int`,
+        })
+        .from(schema.memoryPhotos)
+        .where(
+          and(
+            eq(schema.memoryPhotos.memoryId, memoryId),
+            eq(schema.memoryPhotos.userId, userId),
+          ),
+        );
+      const nextOrder = (maxRow?.maxOrder ?? -1) + 1;
+
+      const [row] = await db
+        .insert(schema.memoryPhotos)
+        .values({ memoryId, userId, photoUrl, uploadOrder: nextOrder })
+        .returning();
+      return mapMemoryPhoto(row);
+    },
+
+    async deleteMemoryPhoto(memoryId, userId, photoId) {
+      const deleted = await db
+        .delete(schema.memoryPhotos)
+        .where(
+          and(
+            eq(schema.memoryPhotos.id, photoId),
+            eq(schema.memoryPhotos.memoryId, memoryId),
+            eq(schema.memoryPhotos.userId, userId),
+          ),
+        )
+        .returning();
+      return deleted.length > 0;
+    },
+
+    async upsertMemorySong(memoryId, userId, position, input) {
+      const [row] = await db
+        .insert(schema.memorySongs)
+        .values({
+          memoryId,
+          userId,
+          position,
+          spotifyUrl: input.spotifyUrl,
+          spotifyTrackId: input.spotifyTrackId,
+          trackTitle: input.trackTitle,
+          artistName: input.artistName,
+          albumArtUrl: input.albumArtUrl,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.memorySongs.memoryId,
+            schema.memorySongs.userId,
+            schema.memorySongs.position,
+          ],
+          set: {
+            spotifyUrl: input.spotifyUrl,
+            spotifyTrackId: input.spotifyTrackId,
+            trackTitle: input.trackTitle,
+            artistName: input.artistName,
+            albumArtUrl: input.albumArtUrl,
+          },
+        })
+        .returning();
+      return mapMemorySong(row);
+    },
+
+    async deleteMemorySong(memoryId, userId, position) {
+      const deleted = await db
+        .delete(schema.memorySongs)
+        .where(
+          and(
+            eq(schema.memorySongs.memoryId, memoryId),
+            eq(schema.memorySongs.userId, userId),
+            eq(schema.memorySongs.position, position),
+          ),
+        )
+        .returning();
+      return deleted.length > 0;
+    },
+
+    async updateMemoryNote(memoryId, note) {
+      const [row] = await db
+        .update(schema.memories)
+        .set({ note })
+        .where(eq(schema.memories.id, memoryId))
+        .returning();
+      return row ? mapMemory(row) : null;
+    },
+
+    async submitMemory(memoryId, userId) {
+      const memory = await loadMemory(memoryId);
+      if (!memory) throw storeError("Memory not found", 404);
+      if (memory.status !== "open") {
+        throw storeError("Memory is no longer open", 409);
+      }
+
+      const memberRows = await loadSessionMemberUsers(memory.sessionId);
+      const memberUserIds = memberRows.map(({ member }) => member.userId);
+      if (!memberUserIds.includes(userId)) {
+        throw storeError("Not a member of this memory", 403);
+      }
+      if ((await submittedUserIdSet(memoryId)).has(userId)) {
+        throw storeError("You already submitted", 409);
+      }
+
+      const songs = await loadMemorySongs(memoryId, userId);
+      const positions = new Set(songs.map((s) => s.position));
+      if (positions.size !== MEMORY_SONGS_PER_USER) {
+        throw storeError(
+          `Add ${MEMORY_SONGS_PER_USER} songs before submitting`,
+          400,
+        );
+      }
+      const photos = await loadMemoryPhotos(memoryId, userId);
+      if (!isValidMemoryPhotoCount(photos.length)) {
+        throw storeError("Photos must come in pairs (2, 4, 6, or 8)", 400);
+      }
+
+      const now = new Date();
+      await db
+        .insert(schema.memorySubmissions)
+        .values({ memoryId, userId, submittedAt: now })
+        .onConflictDoUpdate({
+          target: [
+            schema.memorySubmissions.memoryId,
+            schema.memorySubmissions.userId,
+          ],
+          set: { submittedAt: now },
+        });
+
+      const updated = await lockIfAllSubmitted(memory, now);
+      return {
+        memory: updated,
+        locked: updated.status === "locked",
+        memberUserIds,
+      };
+    },
+
+    async expireStaleMemories() {
+      const now = new Date();
+      const stale = await db
+        .select()
+        .from(schema.memories)
+        .where(
+          and(
+            eq(schema.memories.status, "open"),
+            lt(schema.memories.windowExpiresAt, now),
+          ),
+        );
+
+      const expired: ExpiredMemory[] = [];
+      for (const row of stale) {
+        const memory = mapMemory(row);
+
+        // Everyone submitted right at the boundary — lock instead of discard.
+        const maybeLocked = await lockIfAllSubmitted(memory, now);
+        if (maybeLocked.status === "locked") continue;
+
+        const [updated] = await db
+          .update(schema.memories)
+          .set({ status: "expired" })
+          .where(
+            and(
+              eq(schema.memories.id, memory.id),
+              eq(schema.memories.status, "open"),
+            ),
+          )
+          .returning();
+        if (!updated) continue;
+
+        const photos = await loadMemoryPhotos(memory.id);
+        expired.push({
+          memoryId: memory.id,
+          sessionId: memory.sessionId,
+          photoUrls: photos.map((p) => p.photoUrl),
+        });
+      }
+      return expired;
+    },
+
+    async getSpotifyConnection(userId) {
+      const [row] = await db
+        .select()
+        .from(schema.spotifyConnections)
+        .where(eq(schema.spotifyConnections.userId, userId))
+        .limit(1);
+      return row ? mapSpotifyConnection(row) : null;
+    },
+
+    async upsertSpotifyConnection(userId, tokens) {
+      const [row] = await db
+        .insert(schema.spotifyConnections)
+        .values({
+          userId,
+          spotifyUserId: tokens.spotifyUserId,
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
+        })
+        .onConflictDoUpdate({
+          target: schema.spotifyConnections.userId,
+          set: {
+            spotifyUserId: tokens.spotifyUserId,
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: tokens.expiresAt,
+          },
+        })
+        .returning();
+      return mapSpotifyConnection(row);
+    },
+
+    async deleteSpotifyConnection(userId) {
+      const deleted = await db
+        .delete(schema.spotifyConnections)
+        .where(eq(schema.spotifyConnections.userId, userId))
+        .returning();
+      return deleted.length > 0;
+    },
+
+    async upsertMemoryPlaylist(memoryId, userId, playlistId, playlistUrl) {
+      await db
+        .insert(schema.memoryPlaylists)
+        .values({
+          memoryId,
+          userId,
+          spotifyPlaylistId: playlistId,
+          spotifyPlaylistUrl: playlistUrl,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.memoryPlaylists.memoryId,
+            schema.memoryPlaylists.userId,
+          ],
+          set: {
+            spotifyPlaylistId: playlistId,
+            spotifyPlaylistUrl: playlistUrl,
+          },
+        });
     },
   };
 }
