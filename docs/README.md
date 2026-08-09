@@ -64,4 +64,5 @@ Agent copy: [`.context/features/*/BRIEFING.md`](../.context/) · [spec.yaml](../
 | Vercel deploy, Neon, Blob, two-device demo | [deploy-vercel.md](deploy-vercel.md) |
 | Neon Auth (Google / GitHub) | [auth-neon.md](auth-neon.md) |
 | Quick start / env switch | [../README.md](../README.md) |
+| Web unit tests (`npm run test -w @summerhacks/web`, watch: `test:watch`) | [../README.md](../README.md) |
 | Session notes (2026-08-08 deploy bring-up) | [session-2026-08-08-vercel-neon.md](session-2026-08-08-vercel-neon.md) |

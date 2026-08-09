@@ -77,6 +77,15 @@ Disable **Vercel Authentication** under Project → Deployment Protection if pho
 
 Full map: [docs/deploy-vercel.md](docs/deploy-vercel.md).
 
+## Tests (web)
+
+```bash
+npm run test -w @summerhacks/web          # Vitest, node env
+npm run test:watch -w @summerhacks/web    # watch mode
+```
+
+Colocated `*.test.ts` under `apps/web/src` — pure helpers only (no jsdom).
+
 ## Docs
 
 - [How bump works](docs/bump/overview.md)

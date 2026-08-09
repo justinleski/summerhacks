@@ -5,6 +5,7 @@ import { useAmbientLevel } from "../../lib/ambient";
 import { StarGlyph } from "./StarGlyph";
 
 const LINKS = [
+  { to: "/home", label: "Home" },
   { to: "/friends", label: "Friends" },
   { to: "/calendar", label: "Calendar" },
   { to: "/memories", label: "Memories" },

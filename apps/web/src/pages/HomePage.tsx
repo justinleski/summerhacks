@@ -6,14 +6,15 @@ import {
   useEffect,
   useState,
 } from "react";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import type { BootstrapResponse, Session } from "@summerhacks/shared";
-import { OceanShaderCanvas } from "../components/ambient/OceanShaderCanvas";
 import { Toast } from "../components/Toast";
 import {
   EmailAuthPanel,
   type EmailAuthResult,
 } from "../features/auth/EmailAuthPanel";
 import { RecentSessions } from "../features/session/RecentSessions";
+import { LoginChrome } from "./LoginLayouts";
 import {
   api,
   clearAuth,
@@ -57,6 +58,8 @@ function initialPhase(): Phase {
 }
 
 export function HomePage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [name, setName] = useState(getDisplayName() || "");
   const [nameDraft, setNameDraft] = useState("");
@@ -287,6 +290,9 @@ export function HomePage() {
     setName("");
     setNameDraft("");
     setPhase("auth");
+    if (location.pathname !== "/") {
+      navigate("/", { replace: true });
+    }
   }
 
   if (bumpOpen) {
@@ -304,19 +310,18 @@ export function HomePage() {
 
   if (booting) {
     return (
-      <main className="page home-hero">
-        <p className="brand">Summerhacks</p>
-        <p className="lede">Checking sign-in…</p>
-      </main>
+      <LoginChrome title="Welcome back" subtitle="Checking sign-in…">
+        <p className="muted">One moment…</p>
+      </LoginChrome>
     );
   }
 
   if (phase === "email") {
     return (
-      <main className="page home-hero">
-        <p className="brand">Summerhacks</p>
-        <h1>Sign in with email</h1>
-        <p className="lede">Use your email and password to continue.</p>
+      <LoginChrome
+        title="Sign in with email"
+        subtitle="Use your email and password to continue."
+      >
         <EmailAuthPanel
           busy={authBusy}
           setBusy={setAuthBusy}
@@ -336,17 +341,20 @@ export function HomePage() {
         </button>
         {error && <p className="error">{error}</p>}
         <Toast message={toast} onDone={clearToast} />
-      </main>
+      </LoginChrome>
     );
   }
 
   if (phase === "name") {
     return (
-      <main className="page home-hero">
-        <p className="brand">Summerhacks</p>
-        <h1>Add your name</h1>
-        <p className="lede">This is how friends will see you.</p>
-        <form className="bootstrap-form" onSubmit={(e) => void saveDisplayName(e)}>
+      <LoginChrome
+        title="Add your name"
+        subtitle="This is how friends will see you."
+      >
+        <form
+          className="bootstrap-form"
+          onSubmit={(e) => void saveDisplayName(e)}
+        >
           <label>
             Display name
             <input
@@ -365,20 +373,16 @@ export function HomePage() {
         </form>
         {error && <p className="error">{error}</p>}
         <Toast message={toast} onDone={clearToast} />
-      </main>
+      </LoginChrome>
     );
   }
 
   if (phase !== "app") {
     return (
-      <main className="page home-hero">
-        <OceanShaderCanvas />
-        <p className="brand">Summerhacks</p>
-        <h1>Bump to connect</h1>
-        <p className="lede">
-          Shake together to open a shared session — no GPS prompt, reopen anytime.
-        </p>
-
+      <LoginChrome
+        title="Bump to connect"
+        subtitle="Shake together to open a shared session — no GPS prompt, reopen anytime."
+      >
         <div className="oauth-stack">
           {neonAuthEnabled && (
             <>
@@ -417,8 +421,13 @@ export function HomePage() {
         </div>
         {error && <p className="error">{error}</p>}
         <Toast message={toast} onDone={clearToast} />
-      </main>
+      </LoginChrome>
     );
+  }
+
+  // Authenticated + ready: Map is the default app screen. Bump/sessions live at /home.
+  if (location.pathname !== "/home") {
+    return <Navigate to="/map" replace />;
   }
 
   return (

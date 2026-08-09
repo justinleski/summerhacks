@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { BumpCandidate, BumpProposal, Session } from "@summerhacks/shared";
 import { api } from "../../lib/api";
@@ -18,6 +18,18 @@ type Phase =
   | "error";
 
 const THRESHOLD = 16;
+/** Gravity-ish floor; same baseline as haptics. */
+const MAG_BASELINE = 9.5;
+
+/**
+ * Nonlinear 0..1 beacon brightness: rises slowly at first, then accelerates
+ * as magnitude approaches the bump threshold (power curve, not linear).
+ */
+function beaconFromMagnitude(magnitude: number, threshold: number): number {
+  const span = Math.max(1, threshold - MAG_BASELINE);
+  const t = Math.min(1, Math.max(0, (magnitude - MAG_BASELINE) / span));
+  return Math.pow(t, 1.75);
+}
 
 function AnonymousAvatar({
   avatarUrl,
@@ -81,11 +93,18 @@ export function BumpMode({ onClose }: { onClose: () => void }) {
     },
   );
 
+  const waitingToBump = phase === "listening" || phase === "searching";
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+
   const { magnitude, permission, requestPermission, resetPeakGate } =
     useAccelerometerBump({
-      enabled: phase === "listening",
+      // Keep live magnitude through search so the beacon can still track shake.
+      enabled: waitingToBump,
       threshold: THRESHOLD,
       onPeak: async (mag) => {
+        // Peak detection only while listening; searching keeps magnitude for visuals.
+        if (phaseRef.current !== "listening") return;
         vibrateConfirm();
         setPhase("searching");
         const result = await startSearch(mag);
@@ -102,6 +121,15 @@ export function BumpMode({ onClose }: { onClose: () => void }) {
     THRESHOLD,
     phase === "listening",
   );
+
+  const liveBeacon = beaconFromMagnitude(magnitude, THRESHOLD);
+  // Soft floor while searching so the beacon stays present after the peak shake.
+  const beacon =
+    phase === "listening"
+      ? liveBeacon
+      : phase === "searching"
+        ? Math.max(0.32, liveBeacon)
+        : 0;
 
   useEffect(() => {
     if (phase !== "searching" || !bump) return;
@@ -166,7 +194,13 @@ export function BumpMode({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="bump-mode">
+    <div
+      className="bump-mode"
+      style={{
+        ["--bump-beacon" as string]: String(beacon),
+      }}
+    >
+      <div className="bump-beacon" aria-hidden />
       <header className="bump-mode__header">
         <p className="eyebrow">Bump Mode</p>
         <button type="button" className="ghost" onClick={leave}>

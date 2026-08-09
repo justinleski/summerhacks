@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { MemoryListItem } from "@summerhacks/shared";
 import { api } from "../../lib/api";
@@ -8,13 +8,57 @@ import {
   LOCKED_LIST_TTL_MS,
   setCached,
 } from "../../lib/queryCache";
-import { formatMemoryDate, initialsOf } from "./format";
+import { seededTilt } from "./deterministic";
+import { firstNamesOf, initialsOf, memoryHeadline } from "./format";
 
 const SPOTIFY_NOTICES: Record<string, string> = {
   connected: "Spotify connected.",
   denied: "Spotify sign-in was cancelled.",
   error: "Spotify sign-in failed. Try again.",
 };
+
+/** Cards scatter between these bounds, deterministically per memory. */
+const MAX_TILT_DEGREES = 4;
+
+/** `Aug 9 · Ada, Grace` */
+function cardMeta(memory: MemoryListItem): string {
+  const day = new Date(memory.hangoutAt).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  return `${day} · ${firstNamesOf(memory.memberDisplayNames).join(", ")}`;
+}
+
+function MemoryCard({ memory }: { memory: MemoryListItem }) {
+  const tilt = seededTilt(memory.id, MAX_TILT_DEGREES);
+  const style = { "--memory-card-tilt": `${tilt}deg` } as CSSProperties;
+  const title =
+    "title" in memory && typeof (memory as { title?: unknown }).title === "string"
+      ? (memory as { title: string }).title
+      : null;
+
+  return (
+    <Link className="memory-card" style={style} to={`/memories/${memory.id}`}>
+      {memory.coverPhotoUrl ? (
+        <img
+          className="memory-card__cover"
+          src={memory.coverPhotoUrl}
+          alt=""
+          loading="lazy"
+        />
+      ) : (
+        <span className="memory-card__cover memory-card__cover--empty" aria-hidden>
+          {initialsOf(firstNamesOf(memory.memberDisplayNames))}
+        </span>
+      )}
+      <span className="memory-card__title">
+        {memoryHeadline(title, memory.memberDisplayNames)}
+      </span>
+      <span className="memory-card__meta">{cardMeta(memory)}</span>
+      <span className="memory-card__badge">{memory.songCount} ♪</span>
+    </Link>
+  );
+}
 
 export function MemoriesListPage() {
   const [searchParams] = useSearchParams();
@@ -50,60 +94,44 @@ export function MemoriesListPage() {
   }, [load]);
 
   return (
-    <main className="page memories-page">
-      <p className="eyebrow">Keepsakes</p>
-      <h1>Memories</h1>
-      <p className="lede">
-        Locked-in hangouts — receipt, photobooth strips, and the playlist.
-      </p>
+    <main className="memory-shell">
+      <div className="memory-shell__inner memory-shell__inner--wide">
+        <header className="memories-header">
+          <h1 className="memories-header__title">Memories</h1>
+          <p className="memories-header__sub">moments preserved from bumps</p>
+        </header>
 
-      {spotifyNotice && <p className="muted">{spotifyNotice}</p>}
-      {error && <p className="error">{error}</p>}
+        {spotifyNotice && <p className="memory-hint">{spotifyNotice}</p>}
+        {error && <p className="memory-error">{error}</p>}
 
-      <section className="stack-section">
         {loading ? (
-          <p className="muted">Loading…</p>
+          <p className="memory-hint">loading…</p>
         ) : memories.length === 0 ? (
-          <p className="muted">No memories yet. Bump someone to start one.</p>
+          <div className="memory-empty">
+            {/* A blank polaroid waiting to be filled. */}
+            <div className="memory-empty__frame" aria-hidden />
+            <p className="memory-empty__title">no memories yet</p>
+            <p className="memory-empty__hint">bump someone to start one</p>
+          </div>
         ) : (
-          <ul className="plain-list">
+          <ul className="memory-grid">
             {memories.map((m) => (
               <li key={m.id}>
-                <Link className="memory-row" to={`/memories/${m.id}`}>
-                  {m.coverPhotoUrl ? (
-                    <img
-                      className="memory-row__cover"
-                      src={m.coverPhotoUrl}
-                      alt=""
-                      loading="lazy"
-                    />
-                  ) : (
-                    <span
-                      className="memory-row__cover memory-row__cover--empty"
-                      aria-hidden
-                    >
-                      {initialsOf(m.memberDisplayNames)}
-                    </span>
-                  )}
-                  <span className="memory-row__body">
-                    <span className="memory-row__title">
-                      {m.memberDisplayNames.join(" & ")}
-                    </span>
-                    <span className="member-meta">
-                      {formatMemoryDate(m.hangoutAt)}
-                    </span>
-                  </span>
-                  <span className="memory-row__badge">{m.songCount} ♪</span>
-                </Link>
+                <MemoryCard memory={m} />
               </li>
             ))}
           </ul>
         )}
-      </section>
 
-      <Link className="text-link" to="/">
-        ← Home
-      </Link>
+        <div className="memory-detail__group memory-detail__group--back">
+          <Link className="memory-link memory-link--muted" to="/home">
+            <span className="memory-link__glyph" aria-hidden>
+              ←
+            </span>
+            back home
+          </Link>
+        </div>
+      </div>
     </main>
   );
 }

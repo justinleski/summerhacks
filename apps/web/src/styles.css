@@ -87,12 +87,65 @@ html[data-theme="light"] {
     linear-gradient(160deg, var(--bg0), var(--bg1) 50%, #dfeaf7);
 }
 
+ * Memories palette — off-white paper on a blue-tinted table, deep navy ink.
+ * Light is the app default; the dark overrides below flip the paper to navy and
+ * the ink to cream so the keepsakes still read as physical objects at night.
+ */
+:root {
+  --paper-cream: #f5efe4;
+  --paper-cream-warm: #ede4d3;
+  --paper-blue-tint: #e8ecf0;
+  --ink-navy: #0f1e33;
+  --ink-navy-soft: #2a3a54;
+  --ink-muted: #6b7a8f;
+  --accent-blue: #3a5478;
+  --accent-blue-deep: #1e3252;
+  --paper-fold-shadow: rgba(15, 30, 51, 0.12);
+  --paper-crease: rgba(15, 30, 51, 0.06);
+  /* Fainter than a fold crease — used for the receipt's diagonal crumple. */
+  --memory-crease-soft: rgba(15, 30, 51, 0.04);
+  --polaroid-white: #fdfaf3;
+  --polaroid-border: rgba(15, 30, 51, 0.15);
+  /* Dashed "add me" outlines need more contrast than a shadow tint carries. */
+  --memory-dash: rgba(15, 30, 51, 0.3);
+  /* Receipt stock reads a shade lighter than the table it was dropped on. */
+  --memory-receipt-paper: #faf5ec;
+  /* Warm orange-red for the countdown's final hour and odd photo counts. */
+  --memory-warn: #c8623f;
+  --receipt-font-title: "Seymour One", "Impact", sans-serif;
+  --receipt-font-body: "Instrument Serif", "Georgia", serif;
+  --receipt-font-mono: "IBM Plex Mono", "Courier New", monospace;
+}
+
+html[data-theme="dark"] {
+  --paper-cream: #131c28;
+  --paper-cream-warm: #1c2634;
+  --paper-blue-tint: #0d1520;
+  --ink-navy: #f2ece1;
+  --ink-navy-soft: #ccd6e1;
+  --ink-muted: #8b9aad;
+  --accent-blue: #9db4d0;
+  --accent-blue-deep: #c6d6e8;
+  --paper-fold-shadow: rgba(0, 0, 0, 0.55);
+  --paper-crease: rgba(0, 0, 0, 0.28);
+  --memory-crease-soft: rgba(0, 0, 0, 0.18);
+  --polaroid-white: #1e2836;
+  --polaroid-border: rgba(242, 236, 225, 0.16);
+  --memory-dash: rgba(242, 236, 225, 0.3);
+  --memory-receipt-paper: #1a2431;
+  --memory-warn: #e8845c;
+
 @media (prefers-reduced-motion: reduce) {
   .ambient-orb,
   .ambient-flare,
   .checkin-pin,
-  .energy-ring {
+  .energy-ring,
+  .bump-beacon {
     animation: none !important;
+  }
+
+  .bump-beacon {
+    transition: none !important;
   }
 }
 
@@ -344,12 +397,68 @@ button:disabled {
 }
 
 .bump-mode {
+  --bump-beacon: 0;
+  position: relative;
+  isolation: isolate;
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr auto;
   padding: 1.25rem 1.25rem 2rem;
   width: min(720px, 100%);
   margin: 0 auto;
+}
+
+/* Elliptical light beacon — peak near the bottom action button */
+.bump-beacon {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: calc(0.2 + var(--bump-beacon) * 0.8);
+  background:
+    radial-gradient(
+      ellipse 95% 48% at 50% 92%,
+      color-mix(
+        in srgb,
+        var(--glow-1) calc(18% + var(--bump-beacon) * 52%),
+        transparent
+      ) 0%,
+      color-mix(
+        in srgb,
+        var(--iris-1) calc(10% + var(--bump-beacon) * 28%),
+        transparent
+      ) 28%,
+      color-mix(
+        in srgb,
+        var(--iris-2) calc(4% + var(--bump-beacon) * 14%),
+        transparent
+      ) 52%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 42% 22% at 50% 94%,
+      color-mix(
+        in srgb,
+        var(--flare-color) calc(8% + var(--bump-beacon) * 42%),
+        transparent
+      ),
+      transparent 70%
+    );
+  filter: blur(calc(8px + var(--bump-beacon) * 10px));
+  transform: scaleY(calc(0.92 + var(--bump-beacon) * 0.18));
+  transform-origin: 50% 100%;
+  transition:
+    opacity 90ms linear,
+    filter 90ms linear,
+    transform 90ms linear;
+  will-change: opacity, filter, transform;
+}
+
+.bump-mode__header,
+.bump-mode__stage,
+.bump-mode__actions {
+  position: relative;
+  z-index: 1;
 }
 
 .bump-mode__header {
@@ -960,14 +1069,7 @@ html[data-theme="light"] .pixel-swatch--empty {
   }
 }
 
-/* --- Memories --- */
-
-.memory-countdown {
-  font-family: var(--font-display);
-  font-size: 1.6rem;
-  font-variant-numeric: tabular-nums;
-  margin: 0.25rem 0 0.5rem;
-}
+/* --- Memories (develop helpers kept alongside keepsake UI) --- */
 
 .album-window-bar {
   display: flex;
@@ -1006,292 +1108,357 @@ html[data-theme="light"] .pixel-swatch--empty {
   background: var(--surface);
 }
 
-.memory-members {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+/* Login form: style develop auth controls to match login chrome */
+.login-form .bootstrap-form,
+.login-form .email-auth,
+.login-form .oauth-stack {
   display: grid;
-  gap: 0.6rem;
-}
-
-.memory-members li {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.memory-avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 1px solid var(--border);
-  flex: none;
-}
-
-.memory-avatar--empty {
-  display: grid;
-  place-items: center;
-  background: var(--surface);
-  font-family: var(--font-display);
-  font-size: 0.95rem;
-}
-
-.memory-member-name {
-  font-weight: 600;
-}
-
-.memory-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: none;
-}
-
-.memory-dot--done {
-  background: var(--accent);
-}
-
-.memory-dot--pending {
-  background: var(--muted);
-  opacity: 0.5;
-}
-
-.photo-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 0.6rem;
-  margin-top: 0.75rem;
-}
-
-.photo-grid__item {
-  position: relative;
-  aspect-ratio: 4 / 3;
-  border-radius: 0.6rem;
-  overflow: hidden;
-  border: 1px solid var(--border);
-}
-
-.photo-grid__item img {
+  gap: 0.85rem;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
 }
 
-.photo-grid__remove {
-  position: absolute;
-  top: 0.25rem;
-  right: 0.25rem;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: none;
-  cursor: pointer;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.photo-grid__add {
+.login-form .bootstrap-form label,
+.login-form .email-auth label {
   display: grid;
-  place-items: center;
-  gap: 0.15rem;
-  aspect-ratio: 4 / 3;
-  border: 1px dashed var(--border);
-  border-radius: 0.6rem;
-  cursor: pointer;
-  background: var(--surface);
-  font-family: var(--font-display);
-  font-size: 1.5rem;
+  gap: 0.35rem;
+  font-family: var(--receipt-font-mono, "IBM Plex Mono", monospace);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted, var(--muted));
 }
 
-.photo-grid__add input[type="file"] {
+.login-form .bootstrap-form input,
+.login-form .email-auth input {
+  width: 100%;
+  border-radius: 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--ink-navy, var(--ink)) 18%, transparent);
+  background: color-mix(in srgb, var(--paper-cream, #fff) 88%, transparent);
+  color: var(--ink-navy, var(--ink));
+  padding: 0.75rem 0.85rem;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.login-form .primary,
+.login-form .oauth.primary {
+  width: 100%;
+}
+
+.login-form .brand,
+.login-form .home-hero .brand {
   display: none;
 }
 
-.song-slots {
-  display: grid;
-  gap: 0.6rem;
-  margin-top: 0.75rem;
+.login-layout .home-hero {
+  min-height: unset;
+  padding: 0;
+  background: transparent;
 }
 
-.song-slot {
+.login-layout .ocean-shader,
+.login-layout canvas.ocean-shader-canvas {
+  display: none;
+}
+
+/* --- Page shell ---------------------------------------------------------- */
+
+/**
+ * `overflow-x: clip` rather than `hidden` on purpose: clip contains the
+ * photobooth's card-flick without creating a scroll container, which would
+ * otherwise break the sticky submit bar on mobile.
+ */
+.memory-shell {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: clip;
+  color: var(--ink-navy);
+  background-color: var(--paper-cream);
+  background-image: linear-gradient(
+    180deg,
+    var(--paper-blue-tint) 0%,
+    var(--paper-cream) 40%
+  );
+  background-repeat: no-repeat;
+}
+
+/* Grain, so the cream reads as paper stock rather than a flat fill. */
+.memory-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("/noise.png");
+  background-repeat: repeat;
+  background-size: 160px 160px;
+  mix-blend-mode: multiply;
+  /* Barely there on purpose — any higher and the cream reads as a dirty screen
+     rather than paper grain. */
+  opacity: 0.09;
+}
+
+.memory-shell__inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  margin: 0 auto;
+  padding: 48px 20px;
+}
+
+.memory-shell__inner--stack {
+  max-width: 620px;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 0.7rem;
-  background: var(--surface);
 }
 
-.song-slot input {
-  flex: 1;
-  min-width: 0;
+.memory-shell__inner--wide {
+  max-width: 1180px;
 }
 
-.song-slot__index {
+.memory-shell__inner--column {
+  max-width: 480px;
+}
+
+@media (max-width: 639px) {
+  .memory-shell__inner {
+    padding: 32px 16px;
+  }
+
+  .memory-shell__inner--column {
+    max-width: min(92vw, 420px);
+  }
+}
+
+/* Shared atoms ------------------------------------------------------------ */
+
+/* Small mono-caps section label — the only "heading" the Memory pages use. */
+.memory-label {
+  font-family: var(--receipt-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin: 0 0 14px;
+}
+
+.memory-hint {
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+.memory-error {
+  font-family: var(--receipt-font-mono);
+  font-size: 12px;
+  color: var(--memory-warn);
+  margin: 0 0 18px;
+}
+
+/* Footnote-style link: italic serif, no pill, no accent fill. */
+.memory-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 2px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  cursor: pointer;
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--ink-navy);
+  text-align: left;
+  text-decoration: none;
+}
+
+.memory-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.memory-link:disabled {
+  opacity: 0.5;
+  cursor: wait;
+  text-decoration: none;
+}
+
+.memory-link--muted {
+  color: var(--ink-muted);
+}
+
+.memory-link--muted:hover {
+  color: var(--ink-navy);
+}
+
+.memory-link--mono {
+  font-family: var(--receipt-font-mono);
+  font-style: normal;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.memory-link__glyph {
+  font-family: var(--receipt-font-mono);
+  font-style: normal;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.memory-button {
+  font-family: var(--receipt-font-title);
+  font-size: 16px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-navy);
+  background: var(--paper-cream-warm);
+  border: 2px solid var(--ink-navy);
+  border-radius: 0;
+  padding: 15px 26px;
+  min-height: 52px;
+  width: 100%;
+  max-width: 340px;
+  cursor: pointer;
+}
+
+.memory-button:disabled {
+  opacity: 0.4;
+  border-color: var(--ink-muted);
+  color: var(--ink-muted);
+  cursor: not-allowed;
+}
+
+.memory-button--small {
+  font-size: 14px;
+  padding: 12px 20px;
+  min-height: 44px;
+  width: auto;
+  max-width: none;
+}
+
+/* Small circular "remove" affordance. The button carries a 44px hit area; the
+   inner span is the visible 26px chip. */
+.memory-x {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.memory-x > span {
+  display: grid;
+  place-items: center;
   width: 26px;
   height: 26px;
-  flex: none;
-  display: grid;
-  place-items: center;
   border-radius: 50%;
-  border: 1px solid var(--border);
-  font-size: 0.85rem;
-  color: var(--muted);
+  border: 1px solid var(--polaroid-border);
+  background: var(--paper-cream);
+  color: var(--ink-navy);
+  font-family: var(--receipt-font-mono);
+  font-size: 13px;
+  line-height: 1;
 }
 
-.song-slot__art {
-  width: 48px;
-  height: 48px;
-  flex: none;
-  border-radius: 0.35rem;
-  object-fit: cover;
+.memory-x:disabled {
+  opacity: 0.4;
+  cursor: wait;
 }
 
-.song-slot__art--empty {
-  background: var(--bg2);
-}
+/* --- Receipt ------------------------------------------------------------- */
 
-.song-slot__meta {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-}
-
-.song-slot__meta strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.spotify-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  padding: 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  background: var(--surface);
-}
-
-.spotify-banner p {
-  margin: 0;
-}
-
-.submit-bar {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  margin: 2rem 0 1rem;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 0.9rem;
-  background: var(--bg1);
-}
-
-.memory-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: 1.25rem;
-  background: rgba(0, 0, 0, 0.55);
-}
-
-.memory-modal__card {
+/**
+ * The shell owns the tilt and the shadow. It has to: the receipt itself is
+ * masked for its torn edges, and a mask clips `box-shadow`, so the drop shadow
+ * is a `filter` on the parent (which does follow the mask's alpha).
+ * Offset to the right to read as a light source from the top-left.
+ */
+.receipt-shell {
   width: min(420px, 100%);
-  display: grid;
-  gap: 0.75rem;
-  padding: 1.25rem;
-  border: 1px solid var(--border);
-  border-radius: 1rem;
-  background: var(--bg1);
+  margin: 0 auto;
+  transform: rotate(-1.5deg);
+  filter: drop-shadow(6px 16px 22px var(--paper-fold-shadow))
+    drop-shadow(2px 4px 6px var(--paper-fold-shadow));
 }
-
-.memory-modal__card h2 {
-  margin: 0;
-}
-
-/* --- Memories list --- */
-
-.memory-row {
-  display: flex;
-  align-items: center;
-  gap: 0.85rem;
-  padding: 0.75rem 0;
-  text-decoration: none;
-  color: inherit;
-  border-bottom: 1px solid var(--border);
-}
-
-.memory-row__cover {
-  width: 56px;
-  height: 56px;
-  flex: none;
-  border-radius: 0.6rem;
-  object-fit: cover;
-  border: 1px solid var(--border);
-}
-
-.memory-row__cover--empty {
-  display: grid;
-  place-items: center;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-family: var(--font-display);
-  font-size: 1.1rem;
-}
-
-.memory-row__body {
-  display: grid;
-  gap: 0.15rem;
-  flex: 1;
-  min-width: 0;
-}
-
-.memory-row__title {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.memory-row__badge {
-  flex: none;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-/* --- Receipt --- */
 
 .receipt {
-  --receipt-font-title: "Seymour One", "Impact", sans-serif;
-  --receipt-font-body: "Instrument Serif", "Georgia", serif;
-  --receipt-font-mono: "IBM Plex Mono", "Courier New", monospace;
-  --receipt-ink: #111;
-  background-image: url("/paper-texture.png");
-  background-color: #f4efe6;
+  --receipt-tear: 14px;
+  position: relative;
+  padding: calc(40px + var(--receipt-tear)) 32px calc(32px + var(--receipt-tear));
+  color: var(--ink-navy);
+  background-color: var(--memory-receipt-paper);
+  background-image:
+    /* ambient light catching the top edge */
+    linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, transparent 8%),
+    /* one soft diagonal crease, as if the sheet was folded and reopened */
+    linear-gradient(
+      105deg,
+      transparent 38%,
+      var(--memory-crease-soft) 47%,
+      transparent 56%
+    );
+  /* Three mask layers, unioned by the default `add` composite: a fixed-height
+     tear at the top, one at the bottom, and a solid fill between them. Keeping
+     the tears at a fixed px height stops the teeth stretching on tall receipts. */
+  -webkit-mask-image: var(--receipt-tear-top), var(--receipt-tear-bottom),
+    linear-gradient(#000, #000);
+  mask-image: var(--receipt-tear-top), var(--receipt-tear-bottom),
+    linear-gradient(#000, #000);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: top center, bottom center, center;
+  mask-position: top center, bottom center, center;
+  -webkit-mask-size: 100% var(--receipt-tear), 100% var(--receipt-tear),
+    100% calc(100% - var(--receipt-tear) * 2 + 2px);
+  mask-size: 100% var(--receipt-tear), 100% var(--receipt-tear),
+    100% calc(100% - var(--receipt-tear) * 2 + 2px);
+}
+
+/* Crumpled paper. Multiplied so the cream underneath still shows through —
+   overlay read as a dirty screen on a base this light. */
+.receipt::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("/paper-texture-crumpled.png");
   background-repeat: repeat;
-  color: var(--receipt-ink);
-  width: min(420px, 100%);
-  margin: 1.5rem auto;
-  padding: 1.5rem 1.25rem 1.25rem;
-  border-radius: 2px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  background-size: 300px 300px;
+  mix-blend-mode: multiply;
+  opacity: 0.35;
+}
+
+/* Two horizontal fold creases at roughly a third and two thirds down. */
+.receipt::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 32%,
+    var(--paper-crease) 33%,
+    transparent 34%,
+    transparent 65%,
+    var(--paper-crease) 66%,
+    transparent 67%
+  );
 }
 
 .receipt__head {
@@ -1300,24 +1467,27 @@ html[data-theme="light"] .pixel-swatch--empty {
 
 .receipt__title {
   font-family: var(--receipt-font-title);
-  font-size: clamp(1.9rem, 9vw, 2.6rem);
-  line-height: 1.05;
+  font-size: clamp(30px, 9vw, 44px);
+  line-height: 1.04;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: var(--receipt-ink);
+  color: var(--ink-navy);
   margin: 0;
+  overflow-wrap: break-word;
 }
 
 .receipt__subtitle {
   font-family: var(--receipt-font-body);
-  font-size: 0.9rem;
-  letter-spacing: 0.08em;
-  margin: 0.35rem 0 0;
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink-muted);
+  margin: 10px 0 0;
 }
 
 .receipt__rule {
-  border-top: 1px dashed var(--receipt-ink);
-  margin: 0.85rem 0;
+  border-top: 1px dashed var(--ink-navy-soft);
+  margin: 18px 0;
 }
 
 .receipt__items {
@@ -1328,23 +1498,23 @@ html[data-theme="light"] .pixel-swatch--empty {
 
 .receipt__row {
   display: grid;
-  grid-template-columns: 2.2rem 1fr 2.5rem;
-  gap: 0.5rem;
+  grid-template-columns: 2.2rem minmax(0, 1fr) 2.4rem;
+  gap: 8px;
   font-family: var(--receipt-font-mono);
-  font-size: 0.78rem;
-  line-height: 1.9;
+  font-size: 12px;
+  line-height: 1.85;
+  color: var(--ink-navy);
 }
 
 .receipt__row--head {
+  font-size: 11px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  font-weight: 500;
-}
-
-.receipt__qty {
-  text-align: left;
+  color: var(--ink-navy-soft);
 }
 
 .receipt__item {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1352,190 +1522,1264 @@ html[data-theme="light"] .pixel-swatch--empty {
 
 .receipt__amt {
   text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/**
+ * Totals get their own two-column track. On the shared three-column grid the
+ * label landed in the 2.2rem QTY column and clipped to "ITE" / "TOT".
+ * Labels here never truncate — the mobile copy is shortened instead.
+ */
+.receipt__row--total {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  font-family: var(--receipt-font-mono);
+  font-size: 12px;
+  line-height: 1.85;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-navy);
+}
+
+.receipt__row--total > span {
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.receipt__row--total > span:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .receipt__meta {
   font-family: var(--receipt-font-mono);
-  font-size: 0.78rem;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--ink-navy);
 }
 
 .receipt__meta p {
-  margin: 0 0 0.35rem;
+  margin: 0 0 6px;
+  overflow-wrap: break-word;
 }
 
 .receipt__label {
-  font-weight: 500;
+  font-family: var(--receipt-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: var(--ink-navy-soft);
 }
 
 .receipt__note {
   font-family: var(--receipt-font-body);
   font-style: italic;
-  font-size: 0.95rem;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-navy);
 }
 
 .receipt__thanks {
   font-family: var(--receipt-font-body);
   font-style: italic;
+  font-variant-caps: small-caps;
+  font-size: 15px;
+  letter-spacing: 0.1em;
   text-align: center;
-  margin: 1.1rem 0;
+  color: var(--ink-muted);
+  margin: 22px 0 14px;
 }
 
 .receipt__barcode {
   display: block;
   width: 100%;
-  height: 46px;
-  fill: var(--receipt-ink);
+  height: 44px;
+  fill: var(--ink-navy);
 }
 
 .receipt__permalink {
   font-family: var(--receipt-font-mono);
-  font-size: 0.62rem;
+  font-size: 10px;
+  letter-spacing: 0.1em;
   text-align: center;
-  color: #6b6b6b;
-  margin: 0.4rem 0 0;
-  word-break: break-all;
+  color: var(--ink-muted);
+  margin: 10px 0 0;
 }
 
-/* --- Photobooth strips --- */
+@media (max-width: 639px) {
+  .receipt-shell {
+    width: min(92vw, 380px);
+    /* Shallower tilt so the corners stay clear of the viewport edge. */
+    transform: rotate(-0.8deg);
+  }
+
+  .receipt {
+    padding: calc(32px + var(--receipt-tear)) 24px
+      calc(32px + var(--receipt-tear));
+  }
+}
+
+/* --- Photobooth strips --------------------------------------------------- */
 
 .photobooth {
   display: grid;
-  gap: 0.75rem;
   justify-items: center;
+  width: 100%;
 }
 
 .photobooth__stage {
-  width: min(230px, 100%);
-  overflow: hidden;
+  position: relative;
+  width: min(240px, 66vw);
+}
+
+/* The current strip sits in normal flow and defines the stage height; the peek
+   strip is absolutely positioned on top of it and takes its height from the
+   same content. */
+.photobooth__peek {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 0;
+  pointer-events: none;
+  transform: translate(12px, 8px) rotate(3deg);
+  transition: transform 350ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.photobooth__peek--left {
+  transform: translate(-12px, 8px) rotate(-3deg);
+}
+
+/* Slides forward into the current strip's resting position as it is flicked. */
+.photobooth__peek--advance {
+  transform: translate(0, 0) rotate(-2deg);
 }
 
 .photobooth__tap {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   padding: 0;
-  border: none;
+  border: 0;
+  border-radius: 0;
   background: none;
   cursor: pointer;
 }
 
 .photobooth__strip {
   display: grid;
-  gap: 2px;
-  padding: 8px 8px 22px;
-  background: #fff;
-  border: 1px solid #cfcfcf;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+  gap: 8px;
+  padding: 8px;
+  background: var(--polaroid-white);
+  border: 1px solid var(--polaroid-border);
+  box-shadow: 0 24px 40px -16px var(--paper-fold-shadow),
+    0 6px 12px -8px var(--paper-fold-shadow);
 }
 
+.photobooth__strip--current {
+  transform: rotate(-2deg);
+  transition: transform 350ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 350ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Card flick: off to the side, over-rotated, gone. */
+.photobooth__strip--flick-next {
+  transform: translateX(-20vw) rotate(-15deg);
+  opacity: 0;
+}
+
+.photobooth__strip--flick-prev {
+  transform: translateX(20vw) rotate(15deg);
+  opacity: 0;
+}
+
+/* Each slot is its own polaroid: even margins, thick bottom lip. */
 .photobooth__slot {
-  aspect-ratio: 4 / 3;
-  background: #fff;
-  border: 1px solid #e6e6e6;
-  overflow: hidden;
+  padding: 8px 8px 24px;
+  background: var(--polaroid-white);
+  border: 1px solid var(--polaroid-border);
 }
 
-.photobooth__slot img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.photobooth__frame {
   display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--paper-blue-tint);
 }
 
-.photobooth__slot--empty {
-  background: #fdfdfd;
+/* Ghost slot for the tail of an uneven final strip. */
+.photobooth__slot--empty .photobooth__frame {
+  display: grid;
+  place-items: center;
+  background: var(--polaroid-white);
+  border: 1px dashed var(--polaroid-border);
+}
+
+.photobooth__ghost {
+  font-family: var(--receipt-font-mono);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--ink-muted);
+  opacity: 0.08;
+}
+
+/* Generous top margin: the tilted strip's lower corner dips below its box. */
+.photobooth__hint {
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 32px 0 0;
+  transition: opacity 400ms ease;
+}
+
+.photobooth__hint--gone {
+  opacity: 0;
 }
 
 .photobooth__pager {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
   justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
 }
 
 .photobooth__dots {
   display: inline-flex;
-  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
+/* 8px dot, 44px hit area. */
 .photobooth__dot {
-  width: 9px;
-  height: 9px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
   padding: 0;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: transparent;
+  border: 0;
+  border-radius: 0;
+  background: none;
   cursor: pointer;
 }
 
-.photobooth__dot--on {
-  background: var(--accent);
-  border-color: var(--accent);
+.photobooth__dot::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  opacity: 0.4;
 }
 
-/* Slide + tilt shuffle; skipped when the visitor asks for reduced motion. */
-@media (prefers-reduced-motion: no-preference) {
-  .photobooth__strip--entering {
-    animation: strip-in 300ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+.photobooth__dot--on::before {
+  background: var(--ink-navy);
+  opacity: 1;
+}
+
+.photobooth__count {
+  font-family: var(--receipt-font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 639px) {
+  .photobooth__strip--current {
+    transform: rotate(-1deg);
   }
 
-  .photobooth__strip--leaving-next {
-    animation: strip-out-left 300ms cubic-bezier(0.55, 0.06, 0.68, 0.19) both;
+  /* Reduced peek offset so the stack never crowds the narrow viewport. */
+  .photobooth__peek {
+    transform: translate(6px, 4px) rotate(2deg);
   }
 
-  .photobooth__strip--leaving-prev {
-    animation: strip-out-right 300ms cubic-bezier(0.55, 0.06, 0.68, 0.19) both;
+  .photobooth__peek--left {
+    transform: translate(-6px, 4px) rotate(-2deg);
+  }
+
+  .photobooth__peek--advance {
+    transform: translate(0, 0) rotate(-1deg);
   }
 }
 
-@keyframes strip-in {
-  from {
-    transform: translateX(115%) rotate(8deg);
+/* Instant swap, no tumble. */
+@media (prefers-reduced-motion: reduce) {
+  .photobooth__strip--current,
+  .photobooth__peek {
+    transition: none;
+  }
+
+  .photobooth__strip--flick-next,
+  .photobooth__strip--flick-prev {
+    transform: rotate(-2deg);
     opacity: 0;
   }
-  to {
-    transform: translateX(0) rotate(0deg);
-    opacity: 1;
+
+  .photobooth__peek--advance {
+    transform: translate(0, 0) rotate(-2deg);
   }
 }
 
-@keyframes strip-out-left {
-  from {
-    transform: translateX(0) rotate(0deg);
-    opacity: 1;
-  }
-  to {
-    transform: translateX(-115%) rotate(-8deg);
-    opacity: 0;
-  }
-}
+/* --- Memory detail page -------------------------------------------------- */
 
-@keyframes strip-out-right {
-  from {
-    transform: translateX(0) rotate(0deg);
-    opacity: 1;
-  }
-  to {
-    transform: translateX(115%) rotate(8deg);
-    opacity: 0;
-  }
-}
-
-.playlist-card {
+.memory-detail__group {
   display: grid;
-  gap: 0.6rem;
-  justify-items: start;
+  justify-items: center;
+  width: 100%;
 }
 
-.playlist-card a.primary {
+.memory-detail__group--photos {
+  margin-top: 64px;
+}
+
+.memory-detail__group--sound {
+  margin-top: 32px;
+}
+
+.memory-detail__group--back {
+  margin-top: 64px;
+}
+
+@media (max-width: 639px) {
+  .memory-detail__group--photos {
+    margin-top: 48px;
+  }
+}
+
+/* --- Memories list ------------------------------------------------------- */
+
+.memories-header {
+  margin: 0 0 32px;
+}
+
+.memories-header__title {
+  font-family: var(--receipt-font-title);
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-navy);
+  margin: 0;
+}
+
+.memories-header__sub {
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--ink-muted);
+  margin: 8px 0 0;
+}
+
+@media (max-width: 639px) {
+  .memories-header {
+    text-align: center;
+  }
+}
+
+.memory-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 32px;
+  align-items: start;
+}
+
+@media (min-width: 640px) {
+  .memory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Staggered offsets stand in for masonry — keeps the "scattered on a table"
+     read without pulling in a layout library. */
+  .memory-grid > li:nth-child(3n + 2) {
+    margin-top: 28px;
+  }
+
+  .memory-grid > li:nth-child(3n) {
+    margin-top: 12px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .memory-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.memory-card {
+  position: relative;
+  display: block;
+  padding: 12px 12px 16px;
+  color: var(--ink-navy);
+  background: var(--polaroid-white);
+  border: 1px solid var(--polaroid-border);
   text-decoration: none;
+  box-shadow: 0 24px 40px -16px var(--paper-fold-shadow),
+    0 6px 12px -8px var(--paper-fold-shadow);
+  transform: rotate(var(--memory-card-tilt, 0deg));
+  transition: transform 200ms ease, box-shadow 200ms ease;
 }
 
-html[data-theme="light"] .memory-row,
-html[data-theme="light"] .memory-cta {
-  border-color: rgba(20, 32, 22, 0.14);
+@media (hover: hover) {
+  .memory-card:hover {
+    transform: rotate(0deg) translateY(-4px);
+    box-shadow: 0 32px 52px -14px var(--paper-fold-shadow),
+      0 10px 18px -8px var(--paper-fold-shadow);
+  }
+}
+
+.memory-card:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 4px;
+}
+
+.memory-card__cover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--paper-blue-tint);
+}
+
+.memory-card__cover--empty {
+  display: grid;
+  place-items: center;
+  font-family: var(--receipt-font-title);
+  font-size: 48px;
+  line-height: 1;
+  color: var(--ink-navy-soft);
+}
+
+.memory-card__title {
+  display: block;
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink-navy);
+  margin: 12px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-card__meta {
+  display: block;
+  font-family: var(--receipt-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  margin: 5px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sticker-style count, counter-rotated against the card's tilt. */
+.memory-card__badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px 7px;
+  font-family: var(--receipt-font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--ink-navy);
+  background: var(--paper-cream);
+  border: 1px solid var(--polaroid-border);
+  transform: rotate(calc(var(--memory-card-tilt, 0deg) * -1));
+}
+
+.memory-empty {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 56px 0;
+  text-align: center;
+}
+
+.memory-empty__frame {
+  width: min(220px, 62vw);
+  padding: 12px 12px 40px;
+  background: var(--polaroid-white);
+  border: 1px solid var(--polaroid-border);
+  transform: rotate(-3deg);
+  box-shadow: 0 24px 40px -16px var(--paper-fold-shadow),
+    0 6px 12px -8px var(--paper-fold-shadow);
+}
+
+.memory-empty__frame::before {
+  content: "";
+  display: block;
+  aspect-ratio: 4 / 3;
+  background: var(--paper-blue-tint);
+}
+
+.memory-empty__title {
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 18px;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+.memory-empty__hint {
+  font-family: var(--receipt-font-mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+/* --- Memory build page --------------------------------------------------- */
+
+.memory-build__countdown {
+  text-align: center;
+  margin: 0 0 32px;
+}
+
+.memory-clock {
+  font-family: var(--receipt-font-title);
+  font-size: clamp(28px, 9vw, 36px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--ink-navy);
+  margin: 0;
+}
+
+.memory-clock--urgent {
+  color: var(--memory-warn);
+}
+
+/**
+ * Its own class rather than `.memory-build__countdown p` — as a descendant
+ * selector that outranked `.memory-clock` and quietly restyled the clock too.
+ */
+.memory-build__caption {
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 14px;
+  color: var(--ink-muted);
+  margin: 6px 0 0;
+}
+
+.memory-crew {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+  margin: 0 0 32px;
+  padding: 0;
+}
+
+.memory-crew li {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: 60px;
+}
+
+.memory-crew__avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--polaroid-border);
+  background: var(--polaroid-white);
+}
+
+.memory-crew__avatar--empty {
+  display: grid;
+  place-items: center;
+  font-family: var(--receipt-font-title);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--ink-navy-soft);
+}
+
+.memory-crew__name {
+  max-width: 60px;
+  font-family: var(--receipt-font-mono);
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+  color: var(--ink-navy);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-crew__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.memory-crew__dot--done {
+  background: var(--ink-navy);
+}
+
+.memory-crew__dot--pending {
+  border: 1px solid var(--ink-muted);
+}
+
+.memory-field {
+  margin: 0 0 30px;
+}
+
+.memory-field__wrap {
+  position: relative;
+}
+
+.memory-input,
+.memory-textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 0 10px;
+  border: 0;
+  border-bottom: 1px solid var(--ink-navy-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-navy);
+  font-family: var(--receipt-font-body);
+}
+
+.memory-input {
+  font-size: 20px;
+}
+
+.memory-textarea {
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 62px;
+  /* No grabber: it collides with the hairline underline on a borderless field. */
+  resize: none;
+}
+
+.memory-input:focus,
+.memory-textarea:focus {
+  outline: none;
+  border-bottom-color: var(--ink-navy);
+}
+
+.memory-input::placeholder,
+.memory-textarea::placeholder {
+  font-style: italic;
+  color: var(--ink-muted);
+  opacity: 0.5;
+}
+
+.memory-field__counter {
+  position: absolute;
+  right: 0;
+  bottom: -17px;
+  font-family: var(--receipt-font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+.memory-section {
+  margin: 0 0 30px;
+}
+
+.memory-section__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.memory-section__head .memory-label {
+  margin: 0;
+}
+
+.memory-photos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+@media (min-width: 640px) {
+  .memory-photos {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.memory-photo {
+  position: relative;
+  padding: 6px;
+  background: var(--polaroid-white);
+  border: 1px solid var(--polaroid-border);
+  box-shadow: 0 6px 12px -8px var(--paper-fold-shadow);
+}
+
+.memory-photo img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--paper-blue-tint);
+}
+
+.memory-photo .memory-x {
+  position: absolute;
+  top: -11px;
+  right: -11px;
+}
+
+/* Always visible on touch; revealed on hover or keyboard focus on pointers. */
+@media (hover: hover) {
+  .memory-photo .memory-x {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+
+  .memory-photo:hover .memory-x,
+  .memory-photo .memory-x:focus-visible {
+    opacity: 1;
+  }
+}
+
+.memory-photo-add {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  min-height: 44px;
+  border: 1px dashed var(--memory-dash);
+  background: transparent;
+  color: var(--ink-muted);
+  font-family: var(--receipt-font-mono);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.memory-photo-add input {
+  display: none;
+}
+
+.memory-count {
+  font-family: var(--receipt-font-mono);
+  font-size: 11px;
+  color: var(--ink-navy);
+  margin: 0;
+}
+
+.memory-count--invalid {
+  color: var(--memory-warn);
+}
+
+.memory-songs {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-song {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid var(--polaroid-border);
+  border-radius: 6px;
+  background: var(--polaroid-white);
+}
+
+.memory-song--empty {
+  padding: 0;
+  border-style: dashed;
+  border-color: var(--memory-dash);
+  background: transparent;
+}
+
+.memory-song--empty input {
+  width: 100%;
+  min-height: 48px;
+  padding: 14px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-navy);
+  font-family: var(--receipt-font-mono);
+  font-size: 12px;
+  text-align: center;
+}
+
+.memory-song--empty input:focus {
+  outline: none;
+}
+
+.memory-song--empty input::placeholder {
+  color: var(--ink-muted);
+  opacity: 0.6;
+}
+
+.memory-song__art {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--paper-blue-tint);
+}
+
+.memory-song__meta {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.memory-song__title {
+  font-family: var(--receipt-font-body);
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--ink-navy);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-song__artist {
+  font-family: var(--receipt-font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one boxed element on the page, and it stays deliberately quiet. */
+.memory-banner {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  margin: 0 0 30px;
+  padding: 14px 48px 14px 14px;
+  border: 1px solid var(--polaroid-border);
+  background: var(--paper-cream-warm);
+}
+
+.memory-banner p {
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-navy);
+  margin: 0;
+}
+
+.memory-banner .memory-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+
+.memory-submit {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin: 32px 0 0;
+}
+
+@media (max-width: 639px) {
+  .memory-submit {
+    position: sticky;
+    bottom: 0;
+    padding: 20px 0 18px;
+    /* Fades to solid quickly so content never ghosts through the button. */
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      var(--paper-cream) 26%
+    );
+  }
+}
+
+/* Confirmation — centered dialog on desktop, bottom sheet on mobile. */
+.memory-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  background: rgba(15, 30, 51, 0.5);
+}
+
+.memory-sheet__card {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  max-width: 340px;
+  padding: 26px 22px;
+  background-color: var(--paper-cream);
+  /* A single fold crease — crumpled, but not torn like the receipt. */
+  background-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 43%,
+    var(--paper-crease) 44%,
+    transparent 45%
+  );
+  border: 1px solid var(--polaroid-border);
+  box-shadow: 0 24px 60px -18px rgba(15, 30, 51, 0.5);
+  transform: rotate(-0.5deg);
+}
+
+.memory-sheet__lede {
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 18px;
+  line-height: 1.4;
+  color: var(--ink-navy);
+  margin: 0;
+}
+
+.memory-sheet__sub {
+  font-family: var(--receipt-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+.memory-sheet__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+@media (min-width: 640px) {
+  .memory-sheet {
+    place-items: center;
+    padding: 24px;
+  }
+}
+
+@media (max-width: 639px) {
+  .memory-sheet {
+    align-items: end;
+  }
+
+  .memory-sheet__card {
+    max-width: none;
+    padding: 26px 20px 32px;
+    /* No tilt: a full-width sheet would show gaps at the edges. */
+    transform: none;
+  }
+}
+
+/* Post-submit waiting composition. */
+.memory-wait {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 40px 0;
+  text-align: center;
+}
+
+.memory-wait__big {
+  font-family: var(--receipt-font-title);
+  font-size: clamp(30px, 9vw, 44px);
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  color: var(--ink-navy);
+  margin: 0;
+}
+
+.memory-wait__names {
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 18px;
+  line-height: 1.4;
+  color: var(--ink-navy-soft);
+  margin: 0;
+}
+
+.memory-wait__hint {
+  font-family: var(--receipt-font-body);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+/* --- Static login layout recreations ------------------------------------ */
+
+.login-layout {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
+  overflow: hidden;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+}
+
+.login-layout__media {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  border: 0;
+}
+
+.login-layout__image {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  width: 200%;
+  max-width: none;
+  height: 100%;
+  object-fit: cover;
+  object-position: left center;
+}
+
+.login-layout__panel {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 44px;
+  overflow: hidden;
+}
+
+.login-layout--light .login-layout__panel {
+  color: #112b34;
+  background: #fbfbfa;
+}
+
+.login-layout--dark .login-layout__panel {
+  color: #1e4152;
+  background: #ffe7ae;
+  border-left: 3px solid #0f6ccf;
+}
+
+.login-layout__pattern {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.login-layout__marker {
+  position: absolute;
+  left: var(--login-marker-x);
+  top: var(--login-marker-y);
+  width: var(--login-marker-size);
+  height: var(--login-marker-size);
+  transform: translate(-50%, -50%);
+  opacity: 0.92;
+}
+
+.login-layout--light .login-layout__marker {
+  border-radius: 50%;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(9, 38, 49, 0.98) 0 1px,
+      rgba(9, 38, 49, 0.3) 1px 2px,
+      transparent 2px 3px
+    ),
+    #102b35;
+  box-shadow: inset 0 0 0 1px rgba(9, 38, 49, 0.12);
+}
+
+.login-layout--dark .login-layout__marker {
+  background: #244d5d;
+  box-shadow: inset 0 0 0 1px rgba(255, 231, 174, 0.08);
+}
+
+.login-layout--light .login-layout__marker--soft {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(117, 127, 119, 0.88) 0 1px,
+      rgba(117, 127, 119, 0.2) 1px 2px,
+      transparent 2px 3px
+    ),
+    #89908a;
+}
+
+.login-layout--light .login-layout__marker--mid {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(48, 65, 62, 0.94) 0 1px,
+      rgba(48, 65, 62, 0.25) 1px 2px,
+      transparent 2px 3px
+    ),
+    #3d4e4a;
+}
+
+.login-layout--dark .login-layout__marker--soft {
+  background: #39566c;
+}
+
+.login-layout--dark .login-layout__marker--mid {
+  background: #2f5166;
+}
+
+.login-layout__marker--strong {
+  opacity: 1;
+}
+
+.login-form {
+  width: min(100%, 368px);
+  display: grid;
+  gap: 18px;
+  padding: 28px 0;
+}
+
+.login-form__brand {
+  margin: 0 0 6px;
+  color: currentColor;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.login-form__title {
+  margin: 0;
+  color: currentColor;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: clamp(34px, 6vw, 52px);
+  line-height: 1.02;
+  letter-spacing: 0;
+}
+
+.login-form__subtitle {
+  margin: -8px 0 2px;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.login-form__fields {
+  display: grid;
+  gap: 14px;
+}
+
+.login-field {
+  display: grid;
+  gap: 7px;
+  color: color-mix(in srgb, currentColor 78%, transparent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.login-field input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 0;
+  color: currentColor;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  font: inherit;
+  font-size: 15px;
+}
+
+.login-field input::placeholder {
+  color: color-mix(in srgb, currentColor 42%, transparent);
+}
+
+.login-field input:focus {
+  outline: 2px solid color-mix(in srgb, currentColor 34%, transparent);
+  outline-offset: 2px;
+}
+
+.login-form__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 36px;
+  font-size: 13px;
+}
+
+.login-form a {
+  color: currentColor;
+  text-underline-offset: 3px;
+}
+
+.login-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in srgb, currentColor 78%, transparent);
+}
+
+.login-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: currentColor;
+}
+
+.login-submit {
+  width: 100%;
+  min-height: 50px;
+  border-radius: 0;
+  color: #fbfbfa;
+  background: #112b34;
+  font-weight: 700;
+}
+
+.login-layout--dark .login-submit {
+  background: #1f4b62;
+}
+
+.login-form__switch {
+  margin: 2px 0 0;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  font-size: 14px;
+  text-align: center;
+}
+
+@media (max-width: 820px) {
+  .login-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .login-layout__media {
+    min-height: 34vh;
+    border-bottom: 3px solid transparent;
+  }
+
+  .login-layout--dark .login-layout__media {
+    border-bottom-color: #0f6ccf;
+  }
+
+  .login-layout__panel {
+    min-height: auto;
+    padding: 34px 22px 42px;
+  }
+
+  .login-form {
+    width: min(100%, 420px);
+  }
+}
+
+@media (max-width: 480px) {
+  .login-form__row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
 }
 
 /* --- aa_dev: friends map / checkins / explore / tally --- */

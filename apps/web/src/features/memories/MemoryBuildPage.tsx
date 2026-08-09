@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   MEMORY_MAX_PHOTOS_PER_USER,
@@ -19,7 +25,7 @@ import {
   setCached,
 } from "../../lib/queryCache";
 import { AlbumWindowBar } from "../album/AlbumWindowBar";
-import { formatCountdown, joinNames } from "./format";
+import { firstNameOf, formatCountdown, joinNames } from "./format";
 import {
   memberContributionStatus,
   shouldAutoSubmitMemory,
@@ -27,6 +33,31 @@ import {
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const SONG_SLOTS = Array.from({ length: MEMORY_SONGS_PER_USER }, (_, i) => i);
+
+function BuildShell({ children }: { children: ReactNode }) {
+  return (
+    <main className="memory-shell">
+      <div className="memory-shell__inner memory-shell__inner--column">
+        {children}
+      </div>
+    </main>
+  );
+}
+
+function Countdown({ msLeft, urgent }: { msLeft: number; urgent: boolean }) {
+  return (
+    <div className="memory-build__countdown">
+      <p
+        className={
+          urgent ? "memory-clock memory-clock--urgent" : "memory-clock"
+        }
+      >
+        {formatCountdown(msLeft)}
+      </p>
+      <p className="memory-build__caption">until this window closes</p>
+    </div>
+  );
+}
 
 export function MemoryBuildPage() {
   const { sessionId } = useParams();
@@ -245,20 +276,23 @@ export function MemoryBuildPage() {
 
   if (error && !memory) {
     return (
-      <main className="page">
-        <p className="error">{error}</p>
-        <Link className="text-link" to="/">
-          ← Home
+      <BuildShell>
+        <p className="memory-error">{error}</p>
+        <Link className="memory-link memory-link--muted" to="/home">
+          <span className="memory-link__glyph" aria-hidden>
+            ←
+          </span>
+          back home
         </Link>
-      </main>
+      </BuildShell>
     );
   }
 
   if (!memory) {
     return (
-      <main className="page">
-        <p>Loading album…</p>
-      </main>
+      <BuildShell>
+        <p className="memory-hint">loading memory…</p>
+      </BuildShell>
     );
   }
 
@@ -280,144 +314,157 @@ export function MemoryBuildPage() {
   const canAddPhotos = photoCount < MEMORY_MAX_PHOTOS_PER_USER;
 
   return (
-    <main className="page memory-build-page">
-      <p className="eyebrow">Album interior</p>
-      <h1>Photos & songs</h1>
+    <BuildShell>
+      <Countdown msLeft={msLeft} urgent={urgent} />
       <AlbumWindowBar
         expiresAt={memory.windowExpiresAt}
         startsAt={memory.windowStartsAt}
         now={now}
       />
-      <p className={urgent ? "memory-countdown error" : "memory-countdown"}>
-        {formatCountdown(msLeft)} left to edit
-      </p>
-      <p className="lede">
-        Both of you can add and change songs and photos for 24 hours after the
-        bump. Everything locks when the window ends — the receipt uses this
-        content with your pixel cover.
-      </p>
 
-      {error && <p className="error">{error}</p>}
-
-      <section className="stack-section">
-        <h2>Who&apos;s in</h2>
-        <ul className="memory-members">
-          {memory.members.map((m) => {
-            const status = memberContributionStatus(
-              m,
-              memory.photos,
-              memory.songs,
-            );
-            return (
+      <ul className="memory-crew">
+        {memory.members.map((m) => {
+          const status = memberContributionStatus(
+            m,
+            memory.photos,
+            memory.songs,
+          );
+          return (
             <li key={m.userId}>
               {m.avatarUrl ? (
-                <img className="memory-avatar" src={m.avatarUrl} alt="" />
+                <img className="memory-crew__avatar" src={m.avatarUrl} alt="" />
               ) : (
-                <span className="memory-avatar memory-avatar--empty" aria-hidden>
+                <span
+                  className="memory-crew__avatar memory-crew__avatar--empty"
+                  aria-hidden
+                >
                   {m.displayName.slice(0, 1).toUpperCase()}
                 </span>
               )}
-              <span className="memory-member-name">
-                {m.displayName}
+              <span className="memory-crew__name">
+                {firstNameOf(m.displayName)}
                 {m.isViewer ? " (you)" : ""}
               </span>
               <span
                 className={
                   status.ready
-                    ? "memory-dot memory-dot--done"
-                    : "memory-dot memory-dot--pending"
+                    ? "memory-crew__dot memory-crew__dot--done"
+                    : "memory-crew__dot memory-crew__dot--pending"
                 }
-                aria-hidden
+                aria-label={status.label}
               />
-              <span className="member-meta">{status.label}</span>
             </li>
-            );
-          })}
-        </ul>
-      </section>
+          );
+        })}
+      </ul>
 
-      <section className="stack-section">
-        <div className="section-head">
-          <h2>Your photos</h2>
-          <span className="member-meta">
-            {photoCount}/{MEMORY_MAX_PHOTOS_PER_USER} · up to{" "}
-            {MEMORY_MAX_PHOTOS_PER_USER}
+      {error && <p className="memory-error">{error}</p>}
+
+      <div className="memory-field">
+        <label className="memory-label" htmlFor="memory-note">
+          Note
+        </label>
+        <div className="memory-field__wrap">
+          <textarea
+            id="memory-note"
+            className="memory-textarea"
+            value={note}
+            maxLength={MEMORY_NOTE_MAX}
+            rows={3}
+            placeholder="something about this hangout (optional)"
+            onChange={(e) => {
+              setNote(e.target.value);
+              setNoteDirty(true);
+            }}
+            onBlur={() => void saveNote()}
+          />
+          <span className="memory-field__counter">
+            {note.length}/{MEMORY_NOTE_MAX}
           </span>
         </div>
-        <p className="muted">
-          Add up to {MEMORY_MAX_PHOTOS_PER_USER} photos from your camera or
-          gallery. Compressed before upload.
-        </p>
-        <div className="photo-grid">
+      </div>
+
+      <section className="memory-section">
+        <div className="memory-section__head">
+          <p className="memory-label">Your photos</p>
+          <p className="memory-hint">
+            {photoCount}/{MEMORY_MAX_PHOTOS_PER_USER}
+          </p>
+        </div>
+        <div className="memory-photos">
           {memory.myPhotos.map((photo) => (
-            <div className="photo-grid__item" key={photo.id}>
+            <div className="memory-photo" key={photo.id}>
               <img src={photo.photoUrl} alt="" loading="lazy" />
               <button
                 type="button"
-                className="photo-grid__remove"
+                className="memory-x"
                 aria-label="Remove photo"
                 disabled={busy}
                 onClick={() => void removePhoto(photo.id)}
               >
-                ×
+                <span aria-hidden>×</span>
               </button>
             </div>
           ))}
+          {canAddPhotos && (
+            <>
+              <button
+                type="button"
+                className="memory-photo-add"
+                disabled={busy}
+                onClick={() => cameraInputRef.current?.click()}
+              >
+                <span aria-hidden>+</span>
+                <span className="sr-only">Take photo</span>
+              </button>
+              <button
+                type="button"
+                className="memory-photo-add"
+                disabled={busy}
+                onClick={() => galleryInputRef.current?.click()}
+              >
+                <span aria-hidden>▦</span>
+                <span className="sr-only">Pick from gallery</span>
+              </button>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                hidden
+                disabled={busy}
+                onChange={(e) => {
+                  void addPhotos(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <input
+                ref={galleryInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                disabled={busy}
+                onChange={(e) => {
+                  void addPhotos(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
         </div>
-        {canAddPhotos && (
-          <div className="photo-add-actions">
-            <button
-              type="button"
-              className="secondary"
-              disabled={busy}
-              onClick={() => cameraInputRef.current?.click()}
-            >
-              Take photo
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              disabled={busy}
-              onClick={() => galleryInputRef.current?.click()}
-            >
-              Pick from gallery
-            </button>
-            <input
-              ref={cameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              hidden
-              disabled={busy}
-              onChange={(e) => {
-                void addPhotos(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            <input
-              ref={galleryInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              disabled={busy}
-              onChange={(e) => {
-                void addPhotos(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </div>
-        )}
       </section>
 
       {peerPhotos.length > 0 && (
-        <section className="stack-section">
-          <h2>Their photos</h2>
-          <div className="photo-grid">
+        <section className="memory-section">
+          <div className="memory-section__head">
+            <p className="memory-label">Their photos</p>
+          </div>
+          <div className="memory-photos">
             {peerPhotos.map((photo) => (
-              <div className="photo-grid__item" key={photo.id}>
+              <div className="memory-photo" key={photo.id}>
                 <img src={photo.photoUrl} alt="" loading="lazy" />
-                <span className="member-meta photo-grid__caption">
+                <span className="memory-hint">
                   {nameByUser.get(photo.userId) ?? "Peer"}
                 </span>
               </div>
@@ -426,59 +473,52 @@ export function MemoryBuildPage() {
         </section>
       )}
 
-      <section className="stack-section">
-        <div className="section-head">
-          <h2>Your songs</h2>
-          <span className="member-meta">
-            {memory.mySongs.length}/{MEMORY_SONGS_PER_USER} · up to{" "}
-            {MEMORY_SONGS_PER_USER}
-          </span>
+      <section className="memory-section">
+        <div className="memory-section__head">
+          <p className="memory-label">Your songs</p>
+          <p className="memory-hint">
+            {memory.mySongs.length}/{MEMORY_SONGS_PER_USER}
+          </p>
         </div>
-        <p className="muted">
-          Paste a Spotify track link into any open slot. Connecting Spotify is
-          optional — only needed later to export a playlist.
-        </p>
-        <div className="song-slots">
+        <div className="memory-songs">
           {SONG_SLOTS.map((position) => {
             const song = memory.mySongs.find((s) => s.position === position);
             if (song) {
               return (
-                <div className="song-slot song-slot--filled" key={position}>
+                <div className="memory-song" key={position}>
                   {song.albumArtUrl ? (
                     <img
-                      className="song-slot__art"
+                      className="memory-song__art"
                       src={song.albumArtUrl}
                       alt=""
                     />
                   ) : (
-                    <span
-                      className="song-slot__art song-slot__art--empty"
-                      aria-hidden
-                    />
+                    <span className="memory-song__art" aria-hidden />
                   )}
-                  <span className="song-slot__meta">
-                    <strong>{song.trackTitle}</strong>
-                    <span className="member-meta">{song.artistName}</span>
+                  <span className="memory-song__meta">
+                    <span className="memory-song__title">{song.trackTitle}</span>
+                    <span className="memory-song__artist">
+                      {song.artistName}
+                    </span>
                   </span>
                   <button
                     type="button"
-                    className="ghost"
+                    className="memory-x"
+                    aria-label={`Remove ${song.trackTitle}`}
                     disabled={busy}
                     onClick={() => void removeSong(position)}
                   >
-                    Replace
+                    <span aria-hidden>×</span>
                   </button>
                 </div>
               );
             }
             return (
-              <div className="song-slot" key={position}>
-                <span className="song-slot__index" aria-hidden>
-                  {position + 1}
-                </span>
+              <div className="memory-song memory-song--empty" key={position}>
                 <input
                   value={songDrafts[position] ?? ""}
-                  placeholder="Paste Spotify track link"
+                  placeholder="paste spotify link"
+                  aria-label={`Spotify link for slot ${position + 1}`}
                   inputMode="url"
                   autoComplete="off"
                   disabled={busy}
@@ -489,15 +529,11 @@ export function MemoryBuildPage() {
                     }))
                   }
                   onPaste={(e) => {
-                    const pasted = e.clipboardData.getData("text");
-                    if (!pasted.trim()) return;
+                    const pasted = e.clipboardData.getData("text").trim();
+                    if (!pasted) return;
                     e.preventDefault();
-                    const next = pasted.trim();
-                    setSongDrafts((prev) => ({
-                      ...prev,
-                      [position]: next,
-                    }));
-                    void saveSong(position, next);
+                    setSongDrafts((prev) => ({ ...prev, [position]: pasted }));
+                    void saveSong(position, pasted);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -506,14 +542,6 @@ export function MemoryBuildPage() {
                     }
                   }}
                 />
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy || !(songDrafts[position] ?? "").trim()}
-                  onClick={() => void saveSong(position)}
-                >
-                  Add
-                </button>
               </div>
             );
           })}
@@ -521,9 +549,11 @@ export function MemoryBuildPage() {
       </section>
 
       {peerSongs.length > 0 && (
-        <section className="stack-section">
-          <h2>Their songs</h2>
-          <div className="song-slots">
+        <section className="memory-section">
+          <div className="memory-section__head">
+            <p className="memory-label">Their songs</p>
+          </div>
+          <div className="memory-songs">
             {peerSongs
               .slice()
               .sort(
@@ -531,22 +561,19 @@ export function MemoryBuildPage() {
                   a.userId.localeCompare(b.userId) || a.position - b.position,
               )
               .map((song) => (
-                <div className="song-slot song-slot--filled" key={song.id}>
+                <div className="memory-song" key={song.id}>
                   {song.albumArtUrl ? (
                     <img
-                      className="song-slot__art"
+                      className="memory-song__art"
                       src={song.albumArtUrl}
                       alt=""
                     />
                   ) : (
-                    <span
-                      className="song-slot__art song-slot__art--empty"
-                      aria-hidden
-                    />
+                    <span className="memory-song__art" aria-hidden />
                   )}
-                  <span className="song-slot__meta">
-                    <strong>{song.trackTitle}</strong>
-                    <span className="member-meta">
+                  <span className="memory-song__meta">
+                    <span className="memory-song__title">{song.trackTitle}</span>
+                    <span className="memory-song__artist">
                       {song.artistName} ·{" "}
                       {nameByUser.get(song.userId) ?? "Peer"}
                     </span>
@@ -557,48 +584,27 @@ export function MemoryBuildPage() {
         </section>
       )}
 
-      <section className="stack-section">
-        <div className="section-head">
-          <h2>Shared note</h2>
-          <span className="member-meta">
-            {note.length}/{MEMORY_NOTE_MAX}
-          </span>
-        </div>
-        <p className="muted">Anyone can edit until the 24h window ends.</p>
-        <textarea
-          value={note}
-          maxLength={MEMORY_NOTE_MAX}
-          rows={2}
-          placeholder="One line about this hangout"
-          onChange={(e) => {
-            setNote(e.target.value);
-            setNoteDirty(true);
-          }}
-          onBlur={() => void saveNote()}
-        />
-      </section>
-
-      <div className="submit-bar">
-        <span className="member-meta">
-          {memory.mySubmitted
-            ? `Marked done — you can still edit until ${formatCountdown(msLeft)} left`
-            : "Optional: mark yourself done anytime — or add a photo and a song"}
-        </span>
+      <div className="memory-submit">
         <button
           type="button"
-          className="primary"
+          className="memory-button"
           disabled={!canMarkDone || memory.mySubmitted}
           onClick={() => setConfirming(true)}
         >
           {memory.mySubmitted ? "Done" : "Mark done"}
         </button>
+        <p className="memory-count">
+          {memory.mySubmitted
+            ? `marked done — edit until ${formatCountdown(msLeft)} left`
+            : "optional — you can still edit until the window ends"}
+        </p>
       </div>
 
       {confirming && (
-        <div className="memory-modal" role="dialog" aria-modal="true">
-          <div className="memory-modal__card">
-            <h2>Mark yourself done?</h2>
-            <p className="muted">
+        <div className="memory-sheet" role="dialog" aria-modal="true">
+          <div className="memory-sheet__card">
+            <p className="memory-sheet__lede">Mark yourself done?</p>
+            <p className="memory-sheet__sub">
               This tells{" "}
               {joinNames(
                 memory.members
@@ -608,30 +614,38 @@ export function MemoryBuildPage() {
               you&apos;re finished — you can still edit until the 24h window
               ends.
             </p>
-            <div className="row-actions">
+            <div className="memory-sheet__actions">
               <button
                 type="button"
-                className="primary"
+                className="memory-link memory-link--muted"
+                onClick={() => setConfirming(false)}
+              >
+                keep editing
+              </button>
+              <button
+                type="button"
+                className="memory-button memory-button--small"
                 disabled={busy}
                 onClick={() => void markDone()}
               >
                 Mark done
-              </button>
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => setConfirming(false)}
-              >
-                Keep editing
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <Link className="text-link" to={`/session/${memory.sessionId}`}>
-        ← Back to session
-      </Link>
-    </main>
+      <div className="memory-detail__group memory-detail__group--back">
+        <Link
+          className="memory-link memory-link--muted"
+          to={`/session/${memory.sessionId}`}
+        >
+          <span className="memory-link__glyph" aria-hidden>
+            ←
+          </span>
+          back to session
+        </Link>
+      </div>
+    </BuildShell>
   );
 }

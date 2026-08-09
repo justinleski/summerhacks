@@ -31,6 +31,40 @@ export function joinNames(names: string[], separator = ", "): string {
   return names.join(separator);
 }
 
+/** First word of a display name — `"Ada Lovelace"` becomes `"Ada"`. */
+export function firstNameOf(displayName: string): string {
+  return displayName.trim().split(" ")[0] ?? displayName;
+}
+
+export function firstNamesOf(displayNames: string[]): string[] {
+  return displayNames.map(firstNameOf);
+}
+
+/**
+ * What to call a memory. Falls back to the members' first names when nobody
+ * named it: `Ada & Grace` for a pair, `Ada + 2` for a bigger group.
+ *
+ * Returned in natural case — the receipt title uppercases in CSS, while the
+ * list cards want it as written.
+ */
+export function memoryHeadline(
+  title: string | null | undefined,
+  displayNames: string[],
+): string {
+  if (title?.trim()) return title.trim();
+
+  const names = firstNamesOf(displayNames);
+  if (names.length === 0) return "A memory";
+  if (names.length === 1) return names[0]!;
+  if (names.length === 2) return `${names[0]} & ${names[1]}`;
+  return `${names[0]} + ${names.length - 1}`;
+}
+
+/** Short, atmospheric stand-in for the full permalink. */
+export function shortMemoryId(memoryId: string): string {
+  return memoryId.replace(/-/g, "").slice(0, 8);
+}
+
 export function initialsOf(names: string[]): string {
   return (
     names

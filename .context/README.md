@@ -30,6 +30,15 @@ Machine-oriented feature specs for AI agents. Prefer these over scanning the who
 - **Profile:** Bio + pixel avatar (Blob) + client theme + logout.
 - **Memories:** Album receipt interior — collaborative songs/photos for 24h; lock at window end → receipt, photobooth, Spotify playlist.
 
+## Web unit tests
+
+```bash
+npm run test -w @summerhacks/web          # Vitest run (node env)
+npm run test:watch -w @summerhacks/web    # watch
+```
+
+Specs: colocated `apps/web/src/**/*.{test,spec}.ts` — prefer pure helpers; avoid full React mounts.
+
 ## Local vs Preview DB (agents)
 
 - Unset `DATABASE_URL` → memory store (local OK)

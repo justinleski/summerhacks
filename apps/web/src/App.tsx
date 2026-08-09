@@ -58,14 +58,24 @@ const SessionView = lazy(() =>
     default: m.SessionView,
   })),
 );
+const LoginLightPage = lazy(() =>
+  import("./pages/LoginLayouts").then((m) => ({ default: m.LoginLightPage })),
+);
+const LoginDarkPage = lazy(() =>
+  import("./pages/LoginLayouts").then((m) => ({ default: m.LoginDarkPage })),
+);
 
 export function App() {
   return (
     <BrowserRouter>
       <Suspense fallback={<div className="route-loading">Loading…</div>}>
         <Routes>
+          {/* Login visual QA — outside AppShell chrome. */}
+          <Route path="/login-light" element={<LoginLightPage />} />
+          <Route path="/login-dark" element={<LoginDarkPage />} />
           <Route element={<AppShell />}>
             <Route path="/" element={<HomePage />} />
+            <Route path="/home" element={<HomePage />} />
             <Route path="/explore" element={<ExplorePage />} />
             <Route path="/friends" element={<FriendsPage />} />
             <Route path="/friends/:friendId/map" element={<FriendMapPage />} />
