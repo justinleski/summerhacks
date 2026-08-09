@@ -52,7 +52,7 @@ Optional for event/avatar/album-cover/memory images: set `BLOB_READ_WRITE_TOKEN`
 
 Album covers are per member (draw → ready → vote or spin). See [.context/features/album/BRIEFING.md](.context/features/album/BRIEFING.md).
 
-Optional for Memories playlists: set `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`, and `CRON_SECRET`. Without them memories still lock and receipts still render; pasting a song link and exporting a playlist return 503. See [docs/memories/overview.md](docs/memories/overview.md).
+Optional for Memories playlists: set `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, and `CRON_SECRET` (`SPOTIFY_REDIRECT_URI` is optional — auto-derived locally and on Vercel). Without them memories still lock and receipts still render; pasting a song link and exporting a playlist return 503. See [docs/memories/overview.md](docs/memories/overview.md).
 
 `.env` / `.env.local` are gitignored. `.env.example` stays in git (placeholders only).
 

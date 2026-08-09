@@ -36,5 +36,5 @@ Machine-oriented feature specs for AI agents. Prefer these over scanning the who
 - Set `DATABASE_URL` on Vercel Preview/Prod → Neon
 - Image/avatar/album-cover/memory-photo uploads need `BLOB_READ_WRITE_TOKEN`
 - Album covers: per-member draw → ready → vote/spin (see `.context/features/album/`)
-- Memory playlists + song paste need `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` / `SPOTIFY_REDIRECT_URI`; the expiry cron and Spotify `state` signing need `CRON_SECRET`
+- Memory playlists + song paste need `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` (`SPOTIFY_REDIRECT_URI` optional — auto-derived); the expiry cron and Spotify `state` signing need `CRON_SECRET`
 - Never commit `.env` / `.vercel/`; use `.env.example` as the template

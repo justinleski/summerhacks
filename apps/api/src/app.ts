@@ -3,6 +3,10 @@ import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { ZodError } from "zod";
 import { activityRoutes } from "./routes/activity.js";
+import {
+  neonAuthProxyRoutes,
+  oauthGoogleRoutes,
+} from "./routes/authProxy.js";
 import { bumpsRoutes } from "./routes/bumps.js";
 import { calendarRoutes } from "./routes/calendar.js";
 import { checkinsRoutes } from "./routes/checkins.js";
@@ -23,7 +27,8 @@ app.use(
   cors({
     origin: (origin) => origin ?? "*",
     allowHeaders: ["Content-Type", "Authorization", "X-User-Token"],
-    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
   }),
 );
 
@@ -36,6 +41,10 @@ app.get("/health", (c) =>
 
 // Public — no requireAuth, mounted here alongside /health before any auth-guarded routes.
 app.route("/tally", tallyRoutes);
+
+// Same-origin Neon Auth proxy (Safari / iOS) + app-owned Google OAuth.
+app.route("/auth", neonAuthProxyRoutes);
+app.route("/oauth/google", oauthGoogleRoutes);
 
 app.route("/users", usersRoutes);
 app.route("/bumps", bumpsRoutes);

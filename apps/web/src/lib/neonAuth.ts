@@ -1,13 +1,41 @@
 import { createAuthClient } from "@neondatabase/neon-js/auth";
 
-export const neonAuthUrl = import.meta.env.VITE_NEON_AUTH_URL as
-  | string
-  | undefined;
+/**
+ * Prefer same-origin `/api/auth` (Hono proxy → Neon). Absolute Neon Auth URLs
+ * are third-party to the SPA and break on Safari / iOS Private.
+ */
+function resolveNeonAuthUrl(): string | undefined {
+  const configured = (import.meta.env.VITE_NEON_AUTH_URL as string | undefined)
+    ?.trim();
+  if (!configured) return undefined;
+  let pathOrUrl = configured;
+  // Force same-origin proxy when pointing at hosted Neon Auth.
+  if (
+    configured.includes("neonauth.") ||
+    configured.includes("/neondb/auth")
+  ) {
+    pathOrUrl = "/api/auth";
+  }
+  if (pathOrUrl.startsWith("/")) {
+    if (typeof window !== "undefined" && window.location?.origin) {
+      return `${window.location.origin}${pathOrUrl}`;
+    }
+    return pathOrUrl;
+  }
+  if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
+    return pathOrUrl;
+  }
+  return undefined;
+}
 
-export const neonAuthEnabled = Boolean(neonAuthUrl?.trim());
+export const neonAuthUrl = resolveNeonAuthUrl();
+
+export const neonAuthEnabled = Boolean(
+  (import.meta.env.VITE_NEON_AUTH_URL as string | undefined)?.trim(),
+);
 
 export const authClient = neonAuthEnabled
-  ? createAuthClient(neonAuthUrl!.trim())
+  ? createAuthClient(neonAuthUrl ?? "/api/auth")
   : null;
 
 export type NeonAuthUser = {
@@ -55,6 +83,50 @@ function neonErrorMessage(error: unknown, fallback: string): string {
   }
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+export class NeonAuthError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "NeonAuthError";
+    this.code = code;
+  }
+}
+
+function throwNeonError(
+  error: { message?: string; code?: string } | null | undefined,
+  fallback: string,
+): never {
+  throw new NeonAuthError(
+    neonErrorMessage(error, fallback),
+    typeof error?.code === "string" ? error.code : undefined,
+  );
+}
+
+export function isNeonUserAlreadyExists(error: unknown): boolean {
+  if (error instanceof NeonAuthError) {
+    if (
+      error.code === "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" ||
+      error.code === "USER_ALREADY_EXISTS"
+    ) {
+      return true;
+    }
+  }
+  if (error && typeof error === "object") {
+    const e = error as { code?: string; error?: { code?: string } };
+    const code = e.code ?? e.error?.code;
+    if (code === "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL") return true;
+    if (code === "USER_ALREADY_EXISTS") return true;
+  }
+  const message = neonErrorMessage(error, "");
+  return /already exists/i.test(message);
+}
+
+/** Absolute app origin for OAuth callbacks (avoids Neon 400 MISSING_ORIGIN). */
+export function neonAppOrigin(): string {
+  return window.location.origin;
 }
 
 /** One getSession() — user + JWT from set-auth-jwt / session.token. */
@@ -120,6 +192,8 @@ function asAuthClient() {
       social: (body: {
         provider: "google";
         callbackURL: string;
+        newUserCallbackURL?: string;
+        errorCallbackURL?: string;
       }) => Promise<unknown>;
     };
     emailOtp: {
@@ -147,7 +221,7 @@ export async function neonSignUpEmail(input: {
   const client = asAuthClient();
   const result = await client.signUp.email(input);
   if (result.error) {
-    throw new Error(neonErrorMessage(result.error, "Sign up failed"));
+    throwNeonError(result.error, "Sign up failed");
   }
   const user = (result.data?.user ?? null) as NeonAuthUser | null;
   const needsVerification = Boolean(user && user.emailVerified === false);
@@ -161,8 +235,51 @@ export async function neonSignInEmail(input: {
   const client = asAuthClient();
   const result = await client.signIn.email(input);
   if (result.error) {
-    throw new Error(neonErrorMessage(result.error, "Sign in failed"));
+    throwNeonError(result.error, "Sign in failed");
   }
+}
+
+export async function neonSignInGoogle(): Promise<void> {
+  // App-owned Google OAuth (same-origin callback). Avoids Neon shared
+  // oauth callback host mismatch that 400s on iOS Safari Private.
+  const cfgRes = await fetch("/api/oauth/google/config");
+  const cfg = (await cfgRes.json().catch(() => null)) as {
+    configured?: boolean;
+  } | null;
+  if (!cfg?.configured) {
+    throw new Error(
+      "Google sign-in is not configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.",
+    );
+  }
+  const returnOrigin = encodeURIComponent(neonAppOrigin());
+  window.location.assign(`/api/oauth/google?returnOrigin=${returnOrigin}`);
+}
+
+/** Finish Google OAuth after redirect (?googleExchange=...). */
+export async function completeGoogleOAuthExchange(
+  exchange: string,
+): Promise<{ token: string; displayName: string }> {
+  const res = await fetch("/api/oauth/google/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ exchange }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text || "Google sign-in failed";
+    try {
+      const parsed = JSON.parse(text) as { error?: string };
+      if (parsed.error) message = parsed.error;
+    } catch {
+      // keep
+    }
+    throw new Error(message);
+  }
+  const data = (await res.json()) as {
+    token: string;
+    user: { displayName: string };
+  };
+  return { token: data.token, displayName: data.user.displayName };
 }
 
 export async function neonVerifyEmailOtp(input: {
@@ -172,7 +289,7 @@ export async function neonVerifyEmailOtp(input: {
   const client = asAuthClient();
   const result = await client.emailOtp.verifyEmail(input);
   if (result.error) {
-    throw new Error(neonErrorMessage(result.error, "Invalid verification code"));
+    throwNeonError(result.error, "Invalid verification code");
   }
 }
 
@@ -184,17 +301,17 @@ export async function neonResendVerificationOtp(email: string): Promise<void> {
       type: "email-verification",
     });
     if (result.error) {
-      throw new Error(neonErrorMessage(result.error, "Could not resend code"));
+      throwNeonError(result.error, "Could not resend code");
     }
     return;
   }
   if (client.sendVerificationEmail) {
     const result = await client.sendVerificationEmail({
       email,
-      callbackURL: window.location.origin,
+      callbackURL: neonAppOrigin(),
     });
     if (result.error) {
-      throw new Error(neonErrorMessage(result.error, "Could not resend code"));
+      throwNeonError(result.error, "Could not resend code");
     }
     return;
   }

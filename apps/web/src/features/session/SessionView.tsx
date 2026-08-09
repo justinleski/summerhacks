@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   COVER_CONTEST_POLL_MS,
+  MEMORY_POLL_INTERVAL_MS,
   type AlbumCover,
   type CoverContest,
   type MeProfile,
@@ -22,6 +23,7 @@ import { AlbumCoverEditor } from "../album/AlbumCoverEditor";
 import { AlbumWindowBar } from "../album/AlbumWindowBar";
 import { CoverSpin } from "../album/CoverSpin";
 import { formatCountdown } from "../memories/format";
+import { memberContributionStatus } from "../memories/memberStatus";
 
 /** `null` = no memory row (sessions from before Memories shipped). */
 type MemoryState = MemoryResponse | null;
@@ -154,22 +156,34 @@ export function SessionView() {
     if (cached) setMemory(cached);
 
     // 404 here just means this session predates Memories, or the window expired.
-    api<{ memory: MemoryResponse }>(`/memories/session/${id}`)
-      .then((res) => {
-        setMemory(res.memory);
-        const ttl =
-          res.memory.status === "locked" ? LOCKED_TTL : OPEN_TTL;
-        setCached(clientCacheKeys.memoryBySession(id), res.memory, ttl);
-        if (res.memory.status === "locked") {
-          setCached(
-            clientCacheKeys.memoryById(res.memory.id),
-            res.memory,
-            ttl,
-            { persistLocked: true },
-          );
-        }
-      })
-      .catch(() => setMemory(null));
+    const loadMemory = () =>
+      api<{ memory: MemoryResponse }>(`/memories/session/${id}`)
+        .then((res) => {
+          setMemory(res.memory);
+          const ttl =
+            res.memory.status === "locked" ? LOCKED_TTL : OPEN_TTL;
+          setCached(clientCacheKeys.memoryBySession(id), res.memory, ttl);
+          if (res.memory.status === "locked") {
+            setCached(
+              clientCacheKeys.memoryById(res.memory.id),
+              res.memory,
+              ttl,
+              { persistLocked: true },
+            );
+          }
+        })
+        .catch(() => setMemory(null));
+
+    void loadMemory();
+    const timer = window.setInterval(() => {
+      // Locked albums are immutable — stop once we know.
+      setMemory((current) => {
+        if (current?.status === "locked") return current;
+        void loadMemory();
+        return current;
+      });
+    }, MEMORY_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
   }, [id]);
 
   useEffect(() => {
@@ -178,15 +192,16 @@ export function SessionView() {
   }, []);
 
   // Poll for peer ready / votes — skip while the pixel editor is open so
-  // drawing stays fully client-side until Save.
+  // drawing stays fully client-side until Save. Once resolved (incl. during
+  // the local spin reveal), stop — polling was restarting CoverSpin forever.
   useEffect(() => {
     if (!id || !contest || editorOpen) return;
-    if (contest.phase === "resolved" && !spinning) return;
+    if (contest.phase === "resolved") return;
     const t = setInterval(() => {
       void loadCovers(id, { bypassCache: true });
     }, COVER_CONTEST_POLL_MS);
     return () => clearInterval(t);
-  }, [id, contest, spinning, loadCovers, editorOpen]);
+  }, [id, contest, loadCovers, editorOpen]);
 
   async function markReady() {
     if (!id) return;
@@ -471,17 +486,22 @@ export function SessionView() {
             Edit photos + songs
           </Link>
           <ul className="plain-list">
-            {memory.members.map((m) => (
-              <li key={m.userId} className="row-item">
-                <span>
-                  {m.displayName}
-                  {m.isViewer ? " (you)" : ""}
-                </span>
-                <span className="member-meta">
-                  {m.submitted ? "marked done" : "still editing"}
-                </span>
-              </li>
-            ))}
+            {memory.members.map((m) => {
+              const status = memberContributionStatus(
+                m,
+                memory.photos,
+                memory.songs,
+              );
+              return (
+                <li key={m.userId} className="row-item">
+                  <span>
+                    {m.displayName}
+                    {m.isViewer ? " (you)" : ""}
+                  </span>
+                  <span className="member-meta">{status.label}</span>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

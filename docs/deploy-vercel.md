@@ -131,7 +131,7 @@ Memories needs four more server-side vars. Everything except song paste and play
 | --- | --- |
 | `SPOTIFY_CLIENT_ID` | OAuth + client-credentials track lookup |
 | `SPOTIFY_CLIENT_SECRET` | same |
-| `SPOTIFY_REDIRECT_URI` | must match the dashboard entry exactly |
+| `SPOTIFY_REDIRECT_URI` | optional override — auto-derived when unset (see below) |
 | `CRON_SECRET` | authorizes the expiry sweeper **and** signs the Spotify OAuth `state` |
 
 1. Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
@@ -143,11 +143,12 @@ Memories needs four more server-side vars. Everything except song paste and play
 ```bash
 npx vercel env add SPOTIFY_CLIENT_ID preview
 npx vercel env add SPOTIFY_CLIENT_SECRET preview
-npx vercel env add SPOTIFY_REDIRECT_URI preview   # the prod callback URL
 npx vercel env add CRON_SECRET preview            # 16+ random chars
+# SPOTIFY_REDIRECT_URI is optional — on Vercel the API derives
+# https://$VERCEL_PROJECT_PRODUCTION_URL/api/spotify/callback
 ```
 
-`SPOTIFY_REDIRECT_URI` is environment-specific — set the localhost value in `.env` and the deployed URL on Vercel.
+When `SPOTIFY_REDIRECT_URI` is unset, local uses `http://localhost:$PORT/api/spotify/callback` and Vercel uses the project production URL. Override only if you need a different callback (e.g. a tunnel).
 
 `vercel.json` registers the sweeper:
 

@@ -525,7 +525,8 @@ export const MEMORY_MIN_PHOTOS_PER_USER = 0;
 export const MEMORY_SONGS_PER_USER = 3;
 export const MEMORY_NOTE_MAX = 140;
 export const PHOTOBOOTH_SLOTS_PER_STRIP = 4;
-export const MEMORY_POLL_INTERVAL_MS = 2000;
+/** Peer contribution status — keep snappy while the album window is open. */
+export const MEMORY_POLL_INTERVAL_MS = 1000;
 
 /** Client/server: locked memories are immutable — cache for a week. */
 export const LOCKED_MEMORY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;

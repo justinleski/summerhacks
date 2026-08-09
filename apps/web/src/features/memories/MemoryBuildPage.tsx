@@ -20,6 +20,10 @@ import {
 } from "../../lib/queryCache";
 import { AlbumWindowBar } from "../album/AlbumWindowBar";
 import { formatCountdown, joinNames } from "./format";
+import {
+  memberContributionStatus,
+  shouldAutoSubmitMemory,
+} from "./memberStatus";
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const SONG_SLOTS = Array.from({ length: MEMORY_SONGS_PER_USER }, (_, i) => i);
@@ -64,6 +68,7 @@ export function MemoryBuildPage() {
       OPEN_TTL,
     );
     if (!noteDirtyRef.current) setNote(res.memory.note ?? "");
+    return res.memory;
   }, [sessionId, navigate]);
 
   useEffect(() => {
@@ -108,7 +113,8 @@ export function MemoryBuildPage() {
         await uploadMemoryPhoto(memory.id, file);
       }
       invalidateOpenAlbum(memory.sessionId, memory.id);
-      await load();
+      const draft = await load();
+      if (draft) await maybeAutoSubmit(draft);
     }, "Photo upload failed");
   }
 
@@ -132,25 +138,27 @@ export function MemoryBuildPage() {
         { method: "PUT", body: JSON.stringify({ spotifyUrl }) },
       );
       setSongDrafts((prev) => ({ ...prev, [position]: "" }));
-      setMemory((prev) =>
-        prev
-          ? {
-              ...prev,
-              mySongs: [
-                ...prev.mySongs.filter((s) => s.position !== position),
-                res.song,
-              ].sort((a, b) => a.position - b.position),
-              songs: [
-                ...prev.songs.filter(
-                  (s) =>
-                    !(s.userId === res.song.userId && s.position === position),
-                ),
-                res.song,
-              ],
-            }
-          : prev,
-      );
+      let nextDraft: MemoryDraftResponse | null = null;
+      setMemory((prev) => {
+        if (!prev) return prev;
+        nextDraft = {
+          ...prev,
+          mySongs: [
+            ...prev.mySongs.filter((s) => s.position !== position),
+            res.song,
+          ].sort((a, b) => a.position - b.position),
+          songs: [
+            ...prev.songs.filter(
+              (s) =>
+                !(s.userId === res.song.userId && s.position === position),
+            ),
+            res.song,
+          ],
+        };
+        return nextDraft;
+      });
       invalidateOpenAlbum(memory.sessionId, memory.id);
+      if (nextDraft) await maybeAutoSubmit(nextDraft);
     }, "Could not add that track");
   }
 
@@ -178,10 +186,10 @@ export function MemoryBuildPage() {
     }, "Could not save the note");
   }
 
-  async function markDone() {
+  async function markDone(opts?: { silent?: boolean }) {
     if (!memory) return;
-    setConfirming(false);
-    await withBusy(async () => {
+    if (!opts?.silent) setConfirming(false);
+    const run = async () => {
       const res = await api<{ memory: MemoryResponse }>(
         `/memories/${memory.id}/submit`,
         { method: "POST", body: JSON.stringify({ confirm: true }) },
@@ -198,7 +206,41 @@ export function MemoryBuildPage() {
         return;
       }
       if (res.memory.status === "open") setMemory(res.memory);
-    }, "Could not mark done");
+    };
+    if (opts?.silent) {
+      try {
+        await run();
+      } catch {
+        // Soft signal — ignore transient failures; poll will catch up.
+      }
+      return;
+    }
+    await withBusy(run, "Could not mark done");
+  }
+
+  async function maybeAutoSubmit(draft: MemoryDraftResponse) {
+    if (
+      !shouldAutoSubmitMemory({
+        mySubmitted: draft.mySubmitted,
+        photoCount: draft.myPhotos.length,
+        songCount: draft.mySongs.length,
+      })
+    ) {
+      return;
+    }
+    // Optimistic: peer UIs pick this up on the next poll.
+    setMemory((prev) =>
+      prev
+        ? {
+            ...prev,
+            mySubmitted: true,
+            members: prev.members.map((m) =>
+              m.isViewer ? { ...m, submitted: true } : m,
+            ),
+          }
+        : prev,
+    );
+    await markDone({ silent: true });
   }
 
   if (error && !memory) {
@@ -260,7 +302,13 @@ export function MemoryBuildPage() {
       <section className="stack-section">
         <h2>Who&apos;s in</h2>
         <ul className="memory-members">
-          {memory.members.map((m) => (
+          {memory.members.map((m) => {
+            const status = memberContributionStatus(
+              m,
+              memory.photos,
+              memory.songs,
+            );
+            return (
             <li key={m.userId}>
               {m.avatarUrl ? (
                 <img className="memory-avatar" src={m.avatarUrl} alt="" />
@@ -275,21 +323,16 @@ export function MemoryBuildPage() {
               </span>
               <span
                 className={
-                  m.submitted
+                  status.ready
                     ? "memory-dot memory-dot--done"
                     : "memory-dot memory-dot--pending"
                 }
                 aria-hidden
               />
-              <span className="member-meta">
-                {m.submitted
-                  ? "marked done"
-                  : m.isViewer
-                    ? "still editing"
-                    : "still writing"}
-              </span>
+              <span className="member-meta">{status.label}</span>
             </li>
-          ))}
+            );
+          })}
         </ul>
       </section>
 
@@ -539,7 +582,7 @@ export function MemoryBuildPage() {
         <span className="member-meta">
           {memory.mySubmitted
             ? `Marked done — you can still edit until ${formatCountdown(msLeft)} left`
-            : "Optional: mark yourself done anytime"}
+            : "Optional: mark yourself done anytime — or add a photo and a song"}
         </span>
         <button
           type="button"

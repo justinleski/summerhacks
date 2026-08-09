@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 import {
   getNeonSession,
+  isNeonUserAlreadyExists,
   neonResendVerificationOtp,
   neonSignInEmail,
   neonSignUpEmail,
@@ -59,6 +60,15 @@ export function EmailAuthPanel({
     }
   }
 
+  async function finishAfterCredentials(opts: { needsName: boolean }) {
+    const session = await getNeonSession();
+    if (session) {
+      await onAuthenticated(opts);
+      return true;
+    }
+    return false;
+  }
+
   async function onSignUp(e: FormEvent) {
     e.preventDefault();
     onError(null);
@@ -72,28 +82,42 @@ export function EmailAuthPanel({
       return;
     }
     setBusy(true);
+    const trimmedEmail = email.trim();
     try {
-      const name = email.trim().split("@")[0] || "User";
-      const { needsVerification } = await neonSignUpEmail({
-        email: email.trim(),
-        password,
-        name,
-      });
-      const session = await getNeonSession();
-      if (session) {
-        await onAuthenticated({ needsName: true });
-      } else if (needsVerification) {
+      const name = trimmedEmail.split("@")[0] || "User";
+      let needsVerification = true;
+      try {
+        const signedUp = await neonSignUpEmail({
+          email: trimmedEmail,
+          password,
+          name,
+        });
+        needsVerification = signedUp.needsVerification;
+      } catch (err) {
+        // Account was created on a prior attempt (or double-submit). Sign in
+        // instead of showing "User already exists" — that message only comes
+        // from /sign-up/email, never from a real sign-in.
+        if (!isNeonUserAlreadyExists(err)) throw err;
+        await neonSignInEmail({ email: trimmedEmail, password });
+        if (await finishAfterCredentials({ needsName: false })) return;
+        setInfo(
+          "Account found — enter the verification code from your email if prompted.",
+        );
+        setMode("verify");
+        return;
+      }
+      if (await finishAfterCredentials({ needsName: true })) return;
+      if (needsVerification) {
         setInfo(
           "Check your email for a verification code (expires in ~15 minutes).",
         );
-        setMode("verify");
       } else {
         // Verify-at-sign-up may be on even if the flag was omitted — prefer OTP step.
         setInfo(
           "If you received a code, enter it below. Otherwise try signing in.",
         );
-        setMode("verify");
       }
+      setMode("verify");
     } catch (err) {
       onError(err instanceof Error ? err.message : "Sign up failed");
     } finally {

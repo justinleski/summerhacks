@@ -28,19 +28,32 @@ function clientSecret(): string {
   return value;
 }
 
+/**
+ * Prefer explicit SPOTIFY_REDIRECT_URI. Otherwise:
+ * - On Vercel: https://$VERCEL_PROJECT_PRODUCTION_URL/api/spotify/callback
+ *   (stable prod host for both production and preview — register that URI in Spotify)
+ * - Locally: http://localhost:$PORT/api/spotify/callback (PORT defaults to 8787)
+ */
 function redirectUri(): string {
-  const value = process.env.SPOTIFY_REDIRECT_URI?.trim();
-  if (!value) {
-    throw spotifyError("SPOTIFY_REDIRECT_URI is not set on the API", 503);
+  const explicit = process.env.SPOTIFY_REDIRECT_URI?.trim();
+  if (explicit) return explicit;
+
+  const vercelHost =
+    process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ||
+    process.env.VERCEL_URL?.trim();
+  if (vercelHost) {
+    const host = vercelHost.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    return `https://${host}/api/spotify/callback`;
   }
-  return value;
+
+  const port = process.env.PORT?.trim() || "8787";
+  return `http://localhost:${port}/api/spotify/callback`;
 }
 
 export function spotifyConfigured(): boolean {
   return Boolean(
     process.env.SPOTIFY_CLIENT_ID?.trim() &&
-      process.env.SPOTIFY_CLIENT_SECRET?.trim() &&
-      process.env.SPOTIFY_REDIRECT_URI?.trim(),
+      process.env.SPOTIFY_CLIENT_SECRET?.trim(),
   );
 }
 

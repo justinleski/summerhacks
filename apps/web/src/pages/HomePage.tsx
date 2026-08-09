@@ -28,8 +28,10 @@ import {
 } from "../lib/queryCache";
 import {
   authClient,
+  completeGoogleOAuthExchange,
   getNeonSession,
   neonAuthEnabled,
+  neonSignInGoogle,
 } from "../lib/neonAuth";
 
 type Phase = "auth" | "email" | "name" | "app";
@@ -92,13 +94,59 @@ export function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-    async function hydrateNeon() {
-      if (!neonAuthEnabled || !authClient) {
+    async function hydrate() {
+      // Already in guest/app or mid name-onboarding — don't wipe with hydrate.
+      if (phase === "app" || phase === "name") {
         setBooting(false);
         return;
       }
-      // Already in guest/app or mid name-onboarding — don't wipe with Neon hydrate.
-      if (phase === "app" || phase === "name") {
+
+      const params = new URLSearchParams(window.location.search);
+      const authError = params.get("authError");
+      const googleExchange = params.get("googleExchange");
+      if (authError || googleExchange) {
+        params.delete("authError");
+        params.delete("googleExchange");
+        const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}${window.location.hash}`;
+        window.history.replaceState({}, "", next);
+      }
+      if (authError) {
+        setError(
+          authError === "google_oauth_failed"
+            ? "Google sign-in failed. Try again."
+            : decodeURIComponent(authError),
+        );
+        setBooting(false);
+        return;
+      }
+
+      if (googleExchange) {
+        setAuthBusy(true);
+        try {
+          const { token, displayName } =
+            await completeGoogleOAuthExchange(googleExchange);
+          if (cancelled) return;
+          setAuth(token, displayName, "guest");
+          setName(displayName);
+          setNeedsName(false);
+          setPhase("app");
+          setToast(`Welcome, ${displayName}`);
+        } catch (err) {
+          if (!cancelled) {
+            setError(
+              err instanceof Error ? err.message : "Google sign-in failed",
+            );
+          }
+        } finally {
+          if (!cancelled) {
+            setAuthBusy(false);
+            setBooting(false);
+          }
+        }
+        return;
+      }
+
+      if (!neonAuthEnabled || !authClient) {
         setBooting(false);
         return;
       }
@@ -133,7 +181,7 @@ export function HomePage() {
         if (!cancelled) setBooting(false);
       }
     }
-    void hydrateNeon();
+    void hydrate();
     return () => {
       cancelled = true;
     };
@@ -200,14 +248,10 @@ export function HomePage() {
   }
 
   async function signInGoogle() {
-    if (!authClient) return;
     setAuthBusy(true);
     setError(null);
     try {
-      await authClient.signIn.social({
-        provider: "google",
-        callbackURL: window.location.origin,
-      });
+      await neonSignInGoogle();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Google sign-in failed");
       setAuthBusy(false);

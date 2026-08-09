@@ -33,7 +33,39 @@ export const PIXEL_PALETTE = [
   "#333c57",
 ] as const;
 
-type Tool = "paint" | "erase";
+type Tool = "paint" | "erase" | "fill";
+
+function floodFill(
+  pixels: (string | null)[],
+  gridSize: number,
+  startIndex: number,
+  fillColor: string | null,
+): { next: (string | null)[]; changed: number[] } | null {
+  const target = pixels[startIndex] ?? null;
+  if (target === fillColor) return null;
+
+  const next = pixels.slice();
+  const changed: number[] = [];
+  const stack = [startIndex];
+  const seen = new Set<number>();
+
+  while (stack.length > 0) {
+    const i = stack.pop()!;
+    if (seen.has(i)) continue;
+    seen.add(i);
+    if ((next[i] ?? null) !== target) continue;
+    next[i] = fillColor;
+    changed.push(i);
+    const col = i % gridSize;
+    const row = Math.floor(i / gridSize);
+    if (col > 0) stack.push(i - 1);
+    if (col < gridSize - 1) stack.push(i + 1);
+    if (row > 0) stack.push(i - gridSize);
+    if (row < gridSize - 1) stack.push(i + gridSize);
+  }
+
+  return changed.length > 0 ? { next, changed } : null;
+}
 
 export function rasterizePixelsToPng(
   pixels: (string | null)[],
@@ -177,6 +209,18 @@ export function PixelCanvasEditor({
   const paintAt = useCallback(
     (index: number) => {
       if (readOnly) return;
+      if (tool === "fill") {
+        const fillColor = color;
+        setPixels((prev) => {
+          const result = floodFill(prev, gridSize, index, fillColor);
+          if (!result) return prev;
+          for (const i of result.changed) {
+            onPaintCell?.(i, fillColor);
+          }
+          return result.next;
+        });
+        return;
+      }
       const value = tool === "erase" ? null : color;
       setPixels((prev) => {
         if (prev[index] === value) return prev;
@@ -186,7 +230,7 @@ export function PixelCanvasEditor({
       });
       onPaintCell?.(index, value);
     },
-    [tool, color, setPixels, onPaintCell, readOnly],
+    [tool, color, setPixels, onPaintCell, readOnly, gridSize],
   );
 
   function cellFromEvent(
@@ -210,9 +254,15 @@ export function PixelCanvasEditor({
     } catch {
       // ignore
     }
-    painting.current = true;
     const idx = cellFromEvent(e);
-    if (idx !== null) paintAt(idx);
+    if (idx === null) return;
+    if (tool === "fill") {
+      painting.current = false;
+      paintAt(idx);
+      return;
+    }
+    painting.current = true;
+    paintAt(idx);
   }
 
   function onPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
@@ -325,6 +375,14 @@ export function PixelCanvasEditor({
               </button>
               <button
                 type="button"
+                className={tool === "fill" ? "primary" : "secondary"}
+                disabled={locked}
+                onClick={() => setTool("fill")}
+              >
+                Fill
+              </button>
+              <button
+                type="button"
                 className={tool === "erase" ? "primary" : "secondary"}
                 disabled={locked}
                 onClick={() => setTool("erase")}
@@ -342,7 +400,9 @@ export function PixelCanvasEditor({
                 const isTransparent = swatch === null;
                 const selected =
                   (tool === "erase" && isTransparent) ||
-                  (tool === "paint" && !isTransparent && color === swatch);
+                  ((tool === "paint" || tool === "fill") &&
+                    !isTransparent &&
+                    color === swatch);
                 return (
                   <button
                     key={i}
@@ -363,7 +423,7 @@ export function PixelCanvasEditor({
                       if (isTransparent) {
                         setTool("erase");
                       } else {
-                        setTool("paint");
+                        setTool((prev) => (prev === "erase" ? "paint" : prev));
                         setColor(swatch);
                       }
                     }}

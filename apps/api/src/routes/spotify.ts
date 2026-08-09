@@ -18,7 +18,7 @@ spotifyRoutes.get("/connect", requireAuth, async (c) => {
     return c.json(
       {
         error:
-          "Spotify is not configured (SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET / SPOTIFY_REDIRECT_URI unset). Memories still work without a playlist.",
+          "Spotify is not configured (SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET unset). Memories still work without a playlist.",
       },
       503,
     );
