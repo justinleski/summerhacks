@@ -263,6 +263,7 @@ export const MEMORY_MAX_PHOTOS_PER_USER = 8;
 export const MEMORY_MIN_PHOTOS_PER_USER = 2;
 export const MEMORY_SONGS_PER_USER = 3;
 export const MEMORY_NOTE_MAX = 140;
+export const MEMORY_TITLE_MAX = 40;
 export const PHOTOBOOTH_SLOTS_PER_STRIP = 4;
 export const MEMORY_POLL_INTERVAL_MS = 2000;
 
@@ -323,6 +324,8 @@ export type MemoryPlaylist = z.infer<typeof memoryPlaylistSchema>;
 const memoryBaseShape = {
   id: z.string().uuid(),
   sessionId: z.string().uuid(),
+  /** Member-chosen name; falls back to member first names on the receipt. */
+  title: z.string().nullable(),
   note: z.string().nullable(),
   /** Mirrors `sessions.createdAt` — when the bump happened. */
   hangoutAt: z.string().datetime(),
@@ -362,6 +365,7 @@ export type MemoryResponse = z.infer<typeof memoryResponseSchema>;
 export const memoryListItemSchema = z.object({
   id: z.string().uuid(),
   sessionId: z.string().uuid(),
+  title: z.string().nullable(),
   hangoutAt: z.string().datetime(),
   lockedAt: z.string().datetime(),
   memberDisplayNames: z.array(z.string()),
@@ -386,6 +390,11 @@ export const updateMemoryNoteBodySchema = z.object({
   note: z.string().max(MEMORY_NOTE_MAX).nullable(),
 });
 export type UpdateMemoryNoteBody = z.infer<typeof updateMemoryNoteBodySchema>;
+
+export const updateMemoryTitleBodySchema = z.object({
+  title: z.string().trim().max(MEMORY_TITLE_MAX).nullable(),
+});
+export type UpdateMemoryTitleBody = z.infer<typeof updateMemoryTitleBodySchema>;
 
 /** Submitting is irreversible, so the client must opt in explicitly. */
 export const submitMemoryBodySchema = z.object({

@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   MEMORY_MAX_PHOTOS_PER_USER,
   MEMORY_NOTE_MAX,
   MEMORY_POLL_INTERVAL_MS,
   MEMORY_SONGS_PER_USER,
+  MEMORY_TITLE_MAX,
   isValidMemoryPhotoCount,
   type MemoryDraftResponse,
   type MemoryResponse,
@@ -12,10 +19,57 @@ import {
   type SpotifyStatusResponse,
 } from "@summerhacks/shared";
 import { api, uploadMemoryPhoto } from "../../lib/api";
-import { formatCountdown, joinNames } from "./format";
+import { firstNameOf, formatCountdown, joinNames } from "./format";
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const SONG_SLOTS = Array.from({ length: MEMORY_SONGS_PER_USER }, (_, i) => i);
+/** How long "all in." shows before the last submitter is sent to the receipt. */
+const ALL_IN_FLASH_MS = 400;
+
+function bannerKey(memoryId: string): string {
+  return `memory:${memoryId}:spotify-banner-dismissed`;
+}
+
+function readDismissed(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeDismissed(key: string): void {
+  try {
+    localStorage.setItem(key, "1");
+  } catch {
+    // Nothing to persist to; the banner just returns next visit.
+  }
+}
+
+function BuildShell({ children }: { children: ReactNode }) {
+  return (
+    <main className="memory-shell">
+      <div className="memory-shell__inner memory-shell__inner--column">
+        {children}
+      </div>
+    </main>
+  );
+}
+
+function Countdown({ msLeft, urgent }: { msLeft: number; urgent: boolean }) {
+  return (
+    <div className="memory-build__countdown">
+      <p
+        className={
+          urgent ? "memory-clock memory-clock--urgent" : "memory-clock"
+        }
+      >
+        {formatCountdown(msLeft)}
+      </p>
+      <p className="memory-build__caption">until this window closes</p>
+    </div>
+  );
+}
 
 export function MemoryBuildPage() {
   const { sessionId } = useParams();
@@ -24,13 +78,22 @@ export function MemoryBuildPage() {
   const [memory, setMemory] = useState<MemoryDraftResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [title, setTitle] = useState("");
+  const [titleDirty, setTitleDirty] = useState(false);
+  const [titleFocused, setTitleFocused] = useState(false);
   const [note, setNote] = useState("");
   const [noteDirty, setNoteDirty] = useState(false);
+  const [noteFocused, setNoteFocused] = useState(false);
   const [songDrafts, setSongDrafts] = useState<Record<number, string>>({});
   const [spotify, setSpotify] = useState<SpotifyStatusResponse | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [allIn, setAllIn] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
+  // Refs so the poll never clobbers text the user is mid-way through typing.
+  const titleDirtyRef = useRef(false);
+  titleDirtyRef.current = titleDirty;
   const noteDirtyRef = useRef(false);
   noteDirtyRef.current = noteDirty;
 
@@ -44,7 +107,7 @@ export function MemoryBuildPage() {
       return;
     }
     setMemory(res.memory);
-    // Don't clobber what the user is mid-way through typing.
+    if (!titleDirtyRef.current) setTitle(res.memory.title ?? "");
     if (!noteDirtyRef.current) setNote(res.memory.note ?? "");
   }, [sessionId, navigate]);
 
@@ -72,6 +135,10 @@ export function MemoryBuildPage() {
       .then(setSpotify)
       .catch(() => setSpotify({ connected: false, spotifyUserId: null }));
   }, []);
+
+  useEffect(() => {
+    if (memory) setBannerDismissed(readDismissed(bannerKey(memory.id)));
+  }, [memory?.id]);
 
   async function withBusy(fn: () => Promise<void>, fallback: string) {
     setBusy(true);
@@ -110,8 +177,8 @@ export function MemoryBuildPage() {
     }, "Could not remove photo");
   }
 
-  async function saveSong(position: number) {
-    const spotifyUrl = (songDrafts[position] ?? "").trim();
+  async function saveSong(position: number, rawUrl?: string) {
+    const spotifyUrl = (rawUrl ?? songDrafts[position] ?? "").trim();
     if (!memory || !spotifyUrl) return;
     await withBusy(async () => {
       const res = await api<{ song: MemorySong }>(
@@ -145,6 +212,18 @@ export function MemoryBuildPage() {
     }, "Could not remove song");
   }
 
+  async function saveTitle() {
+    if (!memory || !titleDirty) return;
+    await withBusy(async () => {
+      await api(`/memories/${memory.id}/title`, {
+        method: "PATCH",
+        body: JSON.stringify({ title: title.trim() || null }),
+      });
+      setTitleDirty(false);
+      await load();
+    }, "Could not save the title");
+  }
+
   async function saveNote() {
     if (!memory || !noteDirty) return;
     await withBusy(async () => {
@@ -166,7 +245,13 @@ export function MemoryBuildPage() {
         { method: "POST", body: JSON.stringify({ confirm: true }) },
       );
       if (res.memory.status === "locked") {
-        navigate(`/memories/${res.memory.id}`, { replace: true });
+        // Being last to submit locks the memory — hold on "all in." a beat.
+        const lockedId = res.memory.id;
+        setAllIn(true);
+        window.setTimeout(
+          () => navigate(`/memories/${lockedId}`, { replace: true }),
+          ALL_IN_FLASH_MS,
+        );
         return;
       }
       setMemory(res.memory);
@@ -180,22 +265,35 @@ export function MemoryBuildPage() {
     }, "Could not start Spotify sign-in");
   }
 
+  if (allIn) {
+    return (
+      <BuildShell>
+        <div className="memory-wait">
+          <p className="memory-wait__big">all in.</p>
+        </div>
+      </BuildShell>
+    );
+  }
+
   if (error && !memory) {
     return (
-      <main className="page">
-        <p className="error">{error}</p>
-        <Link className="text-link" to="/">
-          ← Home
+      <BuildShell>
+        <p className="memory-error">{error}</p>
+        <Link className="memory-link memory-link--muted" to="/">
+          <span className="memory-link__glyph" aria-hidden>
+            ←
+          </span>
+          back home
         </Link>
-      </main>
+      </BuildShell>
     );
   }
 
   if (!memory) {
     return (
-      <main className="page">
-        <p>Loading memory…</p>
-      </main>
+      <BuildShell>
+        <p className="memory-hint">loading memory…</p>
+      </BuildShell>
     );
   }
 
@@ -205,126 +303,159 @@ export function MemoryBuildPage() {
   const photosValid = isValidMemoryPhotoCount(photoCount);
   const songsValid = memory.mySongs.length === MEMORY_SONGS_PER_USER;
   const canSubmit = photosValid && songsValid && !busy;
-  const others = memory.members.filter((m) => !m.isViewer);
+  const pending = memory.members.filter((m) => !m.submitted && !m.isViewer);
 
   if (memory.mySubmitted) {
     return (
-      <main className="page memory-build-page">
-        <p className="eyebrow">Memory</p>
-        <h1>Locked in</h1>
-        <p className="lede">
-          Waiting for {joinNames(others.map((m) => m.displayName))}
-        </p>
-        <p className={urgent ? "memory-countdown error" : "memory-countdown"}>
-          {formatCountdown(msLeft)} left
-        </p>
+      <BuildShell>
+        <Countdown msLeft={msLeft} urgent={urgent} />
 
-        <section className="stack-section">
-          <ul className="plain-list">
-            {memory.members.map((m) => (
-              <li key={m.userId} className="row-item">
-                <span>
-                  {m.displayName}
-                  {m.isViewer ? " (you)" : ""}
-                </span>
-                <span className="member-meta">
-                  {m.submitted ? "submitted" : "still writing"}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="muted">
-            Everyone's photos and songs stay hidden until the last person
-            submits.
+        <div className="memory-wait">
+          <p className="memory-wait__big">submitted,</p>
+          <p className="memory-wait__names">
+            waiting on{" "}
+            {pending.length > 0
+              ? joinNames(pending.map((m) => firstNameOf(m.displayName)))
+              : "the last lock"}
           </p>
-        </section>
+          <p className="memory-wait__hint">their turn to bring the songs</p>
+        </div>
 
-        {error && <p className="error">{error}</p>}
-        <Link className="text-link" to={`/session/${memory.sessionId}`}>
-          ← Back to session
-        </Link>
-      </main>
+        {error && <p className="memory-error">{error}</p>}
+
+        <div className="memory-detail__group memory-detail__group--back">
+          <Link
+            className="memory-link memory-link--muted"
+            to={`/session/${memory.sessionId}`}
+          >
+            <span className="memory-link__glyph" aria-hidden>
+              ←
+            </span>
+            back to session
+          </Link>
+        </div>
+      </BuildShell>
     );
   }
 
+  const showBanner = spotify != null && !spotify.connected && !bannerDismissed;
+
   return (
-    <main className="page memory-build-page">
-      <p className="eyebrow">Memory</p>
-      <h1>Build the memory</h1>
-      <p className={urgent ? "memory-countdown error" : "memory-countdown"}>
-        {formatCountdown(msLeft)} until this closes
-      </p>
-      <p className="lede">
-        3 songs and photos in pairs from everyone. Nobody sees anyone else's
-        picks until the last person submits.
-      </p>
+    <BuildShell>
+      <Countdown msLeft={msLeft} urgent={urgent} />
 
-      {error && <p className="error">{error}</p>}
-
-      <section className="stack-section">
-        <h2>Who's in</h2>
-        <ul className="memory-members">
-          {memory.members.map((m) => (
-            <li key={m.userId}>
-              {m.avatarUrl ? (
-                <img className="memory-avatar" src={m.avatarUrl} alt="" />
-              ) : (
-                <span className="memory-avatar memory-avatar--empty" aria-hidden>
-                  {m.displayName.slice(0, 1).toUpperCase()}
-                </span>
-              )}
-              <span className="memory-member-name">
-                {m.displayName}
-                {m.isViewer ? " (you)" : ""}
+      {/* Who's in — status only, never a hint at what anyone uploaded. */}
+      <ul className="memory-crew">
+        {memory.members.map((m) => (
+          <li key={m.userId}>
+            {m.avatarUrl ? (
+              <img className="memory-crew__avatar" src={m.avatarUrl} alt="" />
+            ) : (
+              <span className="memory-crew__avatar memory-crew__avatar--empty" aria-hidden>
+                {m.displayName.slice(0, 1).toUpperCase()}
               </span>
-              <span
-                className={
-                  m.submitted
-                    ? "memory-dot memory-dot--done"
-                    : "memory-dot memory-dot--pending"
-                }
-                aria-hidden
-              />
-              <span className="member-meta">
-                {m.submitted
-                  ? "submitted"
-                  : m.isViewer
-                    ? "still editing"
-                    : "still writing"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+            )}
+            <span className="memory-crew__name">
+              {firstNameOf(m.displayName)}
+            </span>
+            <span
+              className={
+                m.submitted
+                  ? "memory-crew__dot memory-crew__dot--done"
+                  : "memory-crew__dot memory-crew__dot--pending"
+              }
+              aria-label={m.submitted ? "submitted" : "still writing"}
+            />
+          </li>
+        ))}
+      </ul>
 
-      <section className="stack-section">
-        <div className="section-head">
-          <h2>Photos</h2>
-          <span className={photosValid ? "member-meta" : "error"}>
-            {photoCount}/{MEMORY_MAX_PHOTOS_PER_USER}
-            {photosValid ? " · ready" : " · need an even number"}
-          </span>
+      {error && <p className="memory-error">{error}</p>}
+
+      <div className="memory-field">
+        <label className="memory-label" htmlFor="memory-title">
+          Title
+        </label>
+        <div className="memory-field__wrap">
+          <input
+            id="memory-title"
+            className="memory-input"
+            value={title}
+            maxLength={MEMORY_TITLE_MAX}
+            placeholder="name this memory (optional)"
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setTitleDirty(true);
+            }}
+            onFocus={() => setTitleFocused(true)}
+            onBlur={() => {
+              setTitleFocused(false);
+              void saveTitle();
+            }}
+          />
+          {titleFocused && (
+            <span className="memory-field__counter">
+              {title.length}/{MEMORY_TITLE_MAX}
+            </span>
+          )}
         </div>
-        <p className="muted">Add photos in pairs (2, 4, 6, or 8).</p>
-        <div className="photo-grid">
+      </div>
+
+      <div className="memory-field">
+        <label className="memory-label" htmlFor="memory-note">
+          Note
+        </label>
+        <div className="memory-field__wrap">
+          <textarea
+            id="memory-note"
+            className="memory-textarea"
+            value={note}
+            maxLength={MEMORY_NOTE_MAX}
+            rows={3}
+            placeholder="something about this hangout (optional)"
+            onChange={(e) => {
+              setNote(e.target.value);
+              setNoteDirty(true);
+            }}
+            onFocus={() => setNoteFocused(true)}
+            onBlur={() => {
+              setNoteFocused(false);
+              void saveNote();
+            }}
+          />
+          {noteFocused && (
+            <span className="memory-field__counter">
+              {note.length}/{MEMORY_NOTE_MAX}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <section className="memory-section">
+        <div className="memory-section__head">
+          <p className="memory-label">Photos</p>
+          <p className="memory-hint">add in pairs — 2, 4, 6, or 8</p>
+        </div>
+
+        <div className="memory-photos">
           {memory.myPhotos.map((photo) => (
-            <div className="photo-grid__item" key={photo.id}>
+            <div className="memory-photo" key={photo.id}>
               <img src={photo.photoUrl} alt="" loading="lazy" />
               <button
                 type="button"
-                className="photo-grid__remove"
+                className="memory-x"
                 aria-label="Remove photo"
                 disabled={busy}
                 onClick={() => void removePhoto(photo.id)}
               >
-                ×
+                <span aria-hidden>×</span>
               </button>
             </div>
           ))}
           {photoCount < MEMORY_MAX_PHOTOS_PER_USER && (
-            <label className="photo-grid__add">
+            <label className="memory-photo-add">
               <span aria-hidden>+</span>
-              <span className="member-meta">Add</span>
+              <span className="sr-only">Add photos</span>
               <input
                 type="file"
                 accept="image/*"
@@ -339,56 +470,62 @@ export function MemoryBuildPage() {
             </label>
           )}
         </div>
+
+        <p
+          className={
+            photosValid ? "memory-count" : "memory-count memory-count--invalid"
+          }
+        >
+          {photoCount} photos
+          {photosValid ? " ✓" : " — add or remove one to make it even"}
+        </p>
       </section>
 
-      <section className="stack-section">
-        <div className="section-head">
-          <h2>Songs</h2>
-          <span className={songsValid ? "member-meta" : "error"}>
-            {memory.mySongs.length}/{MEMORY_SONGS_PER_USER}
-          </span>
+      <section className="memory-section">
+        <div className="memory-section__head">
+          <p className="memory-label">Songs</p>
+          <p className="memory-hint">paste three spotify track links</p>
         </div>
-        <div className="song-slots">
+
+        <div className="memory-songs">
           {SONG_SLOTS.map((position) => {
             const song = memory.mySongs.find((s) => s.position === position);
             if (song) {
               return (
-                <div className="song-slot song-slot--filled" key={position}>
+                <div className="memory-song" key={position}>
                   {song.albumArtUrl ? (
                     <img
-                      className="song-slot__art"
+                      className="memory-song__art"
                       src={song.albumArtUrl}
                       alt=""
                     />
                   ) : (
-                    <span
-                      className="song-slot__art song-slot__art--empty"
-                      aria-hidden
-                    />
+                    <span className="memory-song__art" aria-hidden />
                   )}
-                  <span className="song-slot__meta">
-                    <strong>{song.trackTitle}</strong>
-                    <span className="member-meta">{song.artistName}</span>
+                  <span className="memory-song__meta">
+                    <span className="memory-song__title">{song.trackTitle}</span>
+                    <span className="memory-song__artist">
+                      {song.artistName}
+                    </span>
                   </span>
                   <button
                     type="button"
-                    className="ghost"
+                    className="memory-x"
+                    aria-label={`Remove ${song.trackTitle}`}
                     disabled={busy}
                     onClick={() => void removeSong(position)}
                   >
-                    Remove
+                    <span aria-hidden>×</span>
                   </button>
                 </div>
               );
             }
             return (
-              <div className="song-slot" key={position}>
-                <span className="song-slot__index" aria-hidden>
-                  {position + 1}
-                </span>
+              <div className="memory-song memory-song--empty" key={position}>
                 <input
                   value={songDrafts[position] ?? ""}
-                  placeholder="Paste Spotify track link"
+                  placeholder="paste spotify link"
+                  aria-label={`Spotify link for slot ${position + 1}`}
                   inputMode="url"
                   autoComplete="off"
                   disabled={busy}
@@ -399,115 +536,103 @@ export function MemoryBuildPage() {
                     }))
                   }
                   onPaste={(e) => {
-                    const pasted = e.clipboardData.getData("text");
-                    if (!pasted.trim()) return;
+                    const pasted = e.clipboardData.getData("text").trim();
+                    if (!pasted) return;
                     e.preventDefault();
-                    setSongDrafts((prev) => ({
-                      ...prev,
-                      [position]: pasted.trim(),
-                    }));
+                    setSongDrafts((prev) => ({ ...prev, [position]: pasted }));
+                    // Pasting is the whole interaction — resolve it right away.
+                    void saveSong(position, pasted);
                   }}
+                  onBlur={() => void saveSong(position)}
                 />
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy || !(songDrafts[position] ?? "").trim()}
-                  onClick={() => void saveSong(position)}
-                >
-                  Add
-                </button>
               </div>
             );
           })}
         </div>
       </section>
 
-      <section className="stack-section">
-        <div className="section-head">
-          <h2>Shared note</h2>
-          <span className="member-meta">
-            {note.length}/{MEMORY_NOTE_MAX}
-          </span>
+      {showBanner && (
+        <div className="memory-banner">
+          <p>connect spotify to auto-save the playlist when everyone's done</p>
+          <button
+            type="button"
+            className="memory-link memory-link--mono"
+            disabled={busy}
+            onClick={() => void connectSpotify()}
+          >
+            connect →
+          </button>
+          <button
+            type="button"
+            className="memory-x"
+            aria-label="Dismiss"
+            onClick={() => {
+              setBannerDismissed(true);
+              writeDismissed(bannerKey(memory.id));
+            }}
+          >
+            <span aria-hidden>×</span>
+          </button>
         </div>
-        <p className="muted">Anyone in this memory can edit it until it locks.</p>
-        <textarea
-          value={note}
-          maxLength={MEMORY_NOTE_MAX}
-          rows={2}
-          placeholder="One line about this hangout"
-          onChange={(e) => {
-            setNote(e.target.value);
-            setNoteDirty(true);
-          }}
-          onBlur={() => void saveNote()}
-        />
-      </section>
+      )}
 
-      <section className="stack-section">
-        {spotify?.connected ? (
-          <p className="muted">Spotify connected — your playlist saves on lock.</p>
-        ) : (
-          <div className="spotify-banner">
-            <p>Want the playlist saved to your Spotify?</p>
-            <button
-              type="button"
-              className="secondary"
-              disabled={busy}
-              onClick={() => void connectSpotify()}
-            >
-              Connect now
-            </button>
-          </div>
-        )}
-      </section>
-
-      <div className="submit-bar">
-        <span className="member-meta">
-          {songsValid && photosValid
-            ? "Ready to lock in"
-            : `Need ${MEMORY_SONGS_PER_USER} songs and an even photo count`}
-        </span>
+      <div className="memory-submit">
         <button
           type="button"
-          className="primary"
+          className="memory-button"
           disabled={!canSubmit}
           onClick={() => setConfirming(true)}
         >
-          Submit
+          Lock it in
         </button>
+        {!canSubmit && (
+          <p className="memory-count">
+            {songsValid ? "even photo count needed" : "3 songs needed"}
+          </p>
+        )}
       </div>
 
       {confirming && (
-        <div className="memory-modal" role="dialog" aria-modal="true">
-          <div className="memory-modal__card">
-            <h2>Lock your submission?</h2>
-            <p className="muted">
-              This locks your submission. You can't edit after.
+        <div className="memory-sheet" role="dialog" aria-modal="true">
+          <div className="memory-sheet__card">
+            <p className="memory-sheet__lede">
+              once you submit, you can't edit.
             </p>
-            <div className="row-actions">
+            <p className="memory-sheet__sub">
+              waiting on others until the memory locks.
+            </p>
+            <div className="memory-sheet__actions">
               <button
                 type="button"
-                className="primary"
-                disabled={busy}
-                onClick={() => void submit()}
+                className="memory-link memory-link--muted"
+                onClick={() => setConfirming(false)}
               >
-                Yes, submit
+                not yet
               </button>
               <button
                 type="button"
-                className="ghost"
-                onClick={() => setConfirming(false)}
+                className="memory-button memory-button--small"
+                disabled={busy}
+                onClick={() => void submit()}
               >
-                Keep editing
+                Submit
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <Link className="text-link" to={`/session/${memory.sessionId}`}>
-        ← Back to session
-      </Link>
-    </main>
+      <div className="memory-detail__group memory-detail__group--back">
+        <Link
+          className="memory-link memory-link--muted"
+          to={`/session/${memory.sessionId}`}
+        >
+          <span className="memory-link__glyph" aria-hidden>
+            ←
+          </span>
+          back to session
+        </Link>
+      </div>
+    </BuildShell>
   );
 }

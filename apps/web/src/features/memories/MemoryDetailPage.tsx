@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import type {
   ExportPlaylistResponse,
@@ -9,6 +9,17 @@ import type {
 import { api } from "../../lib/api";
 import { PhotoboothCarousel } from "./PhotoboothCarousel";
 import { Receipt } from "./Receipt";
+
+/** Shared wrapper so every state on this route sits on the same cream table. */
+function DetailShell({ children }: { children: ReactNode }) {
+  return (
+    <main className="memory-shell">
+      <div className="memory-shell__inner memory-shell__inner--stack">
+        {children}
+      </div>
+    </main>
+  );
+}
 
 export function MemoryDetailPage() {
   const { id } = useParams();
@@ -76,86 +87,103 @@ export function MemoryDetailPage() {
 
   if (stillOpenSessionId) {
     return (
-      <main className="page">
-        <p className="lede">This memory is still open.</p>
-        <Link className="primary" to={`/memories/session/${stillOpenSessionId}`}>
-          Add photos + songs
+      <DetailShell>
+        <p className="memory-hint">this memory is still open.</p>
+        <Link
+          className="memory-link"
+          to={`/memories/session/${stillOpenSessionId}`}
+        >
+          <span className="memory-link__glyph" aria-hidden>
+            +
+          </span>
+          add photos + songs
         </Link>
-      </main>
+      </DetailShell>
     );
   }
 
   if (error && !memory) {
     return (
-      <main className="page">
-        <p className="error">{error}</p>
-        <Link className="text-link" to="/memories">
-          ← All memories
+      <DetailShell>
+        <p className="memory-error">{error}</p>
+        <Link className="memory-link memory-link--muted" to="/memories">
+          <span className="memory-link__glyph" aria-hidden>
+            ←
+          </span>
+          back to memories
         </Link>
-      </main>
+      </DetailShell>
     );
   }
 
   if (!memory) {
     return (
-      <main className="page">
-        <p>Loading memory…</p>
-      </main>
+      <DetailShell>
+        <p className="memory-hint">loading memory…</p>
+      </DetailShell>
     );
   }
 
   return (
-    <main className="page memory-detail-page">
-      <p className="eyebrow">Memory</p>
-      <h1>{memory.members.map((m) => m.displayName).join(" & ")}</h1>
-
-      {error && <p className="error">{error}</p>}
+    <DetailShell>
+      {error && <p className="memory-error">{error}</p>}
 
       <Receipt memory={memory} />
 
-      <section className="stack-section">
-        <h2>Photobooth</h2>
-        <p className="muted">Tap or swipe the strip to shuffle.</p>
+      <div className="memory-detail__group memory-detail__group--photos">
+        <p className="memory-label">Photos</p>
         <PhotoboothCarousel photos={memory.photos} />
-      </section>
+      </div>
 
-      <section className="stack-section playlist-card">
-        <h2>Playlist</h2>
+      <div className="memory-detail__group memory-detail__group--sound">
+        <p className="memory-label">Soundtrack</p>
+        {/* A footnote, not a call to action. */}
         {playlistUrl ? (
           <a
-            className="primary"
+            className="memory-link"
             href={playlistUrl}
             target="_blank"
             rel="noreferrer"
           >
-            Open in Spotify
+            <span className="memory-link__glyph" aria-hidden>
+              ♪
+            </span>
+            open in spotify
           </a>
         ) : spotify?.connected ? (
           <button
             type="button"
-            className="primary"
+            className="memory-link"
             disabled={busy}
             onClick={() => void exportPlaylist()}
           >
-            Save to Spotify
+            <span className="memory-link__glyph" aria-hidden>
+              +
+            </span>
+            save to spotify
           </button>
         ) : (
           <button
             type="button"
-            className="secondary"
+            className="memory-link"
             onClick={() => void connectSpotify()}
           >
-            Connect Spotify to save this playlist
+            <span className="memory-link__glyph" aria-hidden>
+              ♪
+            </span>
+            connect spotify to save this playlist
           </button>
         )}
-        <p className="muted">
-          {memory.songs.length} tracks from {memory.members.length} people.
-        </p>
-      </section>
+      </div>
 
-      <Link className="text-link" to="/memories">
-        ← All memories
-      </Link>
-    </main>
+      <div className="memory-detail__group memory-detail__group--back">
+        <Link className="memory-link memory-link--muted" to="/memories">
+          <span className="memory-link__glyph" aria-hidden>
+            ←
+          </span>
+          back to memories
+        </Link>
+      </div>
+    </DetailShell>
   );
 }

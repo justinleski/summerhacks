@@ -446,6 +446,7 @@ export function createMemoryStore(): Store {
     const base = {
       id: memory.id,
       sessionId: memory.sessionId,
+      title: memory.title,
       note: memory.note,
       hangoutAt: toIso(memory.windowStartsAt),
       windowStartsAt: toIso(memory.windowStartsAt),
@@ -492,6 +493,7 @@ export function createMemoryStore(): Store {
       id: randomUUID(),
       sessionId,
       status: "open",
+      title: null,
       note: null,
       windowStartsAt: sessionCreatedAt,
       windowExpiresAt: new Date(sessionCreatedAt.getTime() + MEMORY_WINDOW_MS),
@@ -1172,6 +1174,7 @@ export function createMemoryStore(): Store {
           return {
             id: memory.id,
             sessionId: memory.sessionId,
+            title: memory.title,
             hangoutAt: toIso(memory.windowStartsAt),
             lockedAt: toIso(memory.lockedAt ?? memory.windowExpiresAt),
             memberDisplayNames: memoryMemberIds(memory.sessionId).map(
@@ -1241,6 +1244,14 @@ export function createMemoryStore(): Store {
       const memory = memories.get(memoryId);
       if (!memory) return null;
       const updated: StoredMemory = { ...memory, note };
+      memories.set(memoryId, updated);
+      return updated;
+    },
+
+    async updateMemoryTitle(memoryId, title) {
+      const memory = memories.get(memoryId);
+      if (!memory) return null;
+      const updated: StoredMemory = { ...memory, title };
       memories.set(memoryId, updated);
       return updated;
     },

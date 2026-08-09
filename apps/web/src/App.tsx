@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { CalendarPage } from "./features/calendar/CalendarPage";
 import { EventDetailPage } from "./features/calendar/EventDetailPage";
 import { FriendsPage } from "./features/friends/FriendsPage";
+import { DevMemoryPreview } from "./features/memories/DevMemoryPreview";
 import { MemoriesListPage } from "./features/memories/MemoriesListPage";
 import { MemoryBuildPage } from "./features/memories/MemoryBuildPage";
 import { MemoryDetailPage } from "./features/memories/MemoryDetailPage";
@@ -25,6 +26,8 @@ export function App() {
           element={<MemoryBuildPage />}
         />
         <Route path="/memories/:id" element={<MemoryDetailPage />} />
+        {/* Visual QA harness for the Memory pages — fixture data, no API. */}
+        <Route path="/dev/memory-preview/*" element={<DevMemoryPreview />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

@@ -125,6 +125,7 @@ export type StoredMemory = {
   id: string;
   sessionId: string;
   status: MemoryStatus;
+  title: string | null;
   note: string | null;
   windowStartsAt: Date;
   windowExpiresAt: Date;
@@ -282,6 +283,11 @@ export interface Store {
   updateMemoryNote(
     memoryId: string,
     note: string | null,
+  ): Promise<StoredMemory | null>;
+  /** Shared title — same semantics as the note: any member, until lock. */
+  updateMemoryTitle(
+    memoryId: string,
+    title: string | null,
   ): Promise<StoredMemory | null>;
   submitMemory(memoryId: string, userId: string): Promise<SubmitMemoryResult>;
   /** Locks fully-submitted stale memories, expires the rest. Returns expired ones. */

@@ -7,6 +7,7 @@ import {
   putMemorySongBodySchema,
   submitMemoryBodySchema,
   updateMemoryNoteBodySchema,
+  updateMemoryTitleBodySchema,
 } from "@summerhacks/shared";
 import { getStore } from "../db/index.js";
 import type { StoredMemoryAccess } from "../db/types.js";
@@ -236,6 +237,24 @@ memoriesRoutes.patch("/:id/note", async (c) => {
     const updated = await getStore().updateMemoryNote(memoryId, note);
     if (!updated) return c.json({ error: "Not found" }, 404);
     return c.json({ note: updated.note });
+  } catch (err) {
+    return httpErrorFromStore(c, err);
+  }
+});
+
+/** Shared title — same semantics as the note: any member, until the memory locks. */
+memoriesRoutes.patch("/:id/title", async (c) => {
+  const memoryId = c.req.param("id");
+  const userId = c.get("userId");
+  const body = updateMemoryTitleBodySchema.parse(await c.req.json());
+  try {
+    const access = await requireMemberAccess(memoryId, userId);
+    assertOpen(access);
+
+    const title = body.title?.trim() ? body.title.trim() : null;
+    const updated = await getStore().updateMemoryTitle(memoryId, title);
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    return c.json({ title: updated.title });
   } catch (err) {
     return httpErrorFromStore(c, err);
   }

@@ -88,6 +88,7 @@ function mapMemory(row: typeof schema.memories.$inferSelect): StoredMemory {
     id: row.id,
     sessionId: row.sessionId,
     status: row.status as StoredMemory["status"],
+    title: row.title,
     note: row.note,
     windowStartsAt: row.windowStartsAt,
     windowExpiresAt: row.windowExpiresAt,
@@ -361,6 +362,7 @@ export function createNeonStore(databaseUrl: string): Store {
     const base = {
       id: memory.id,
       sessionId: memory.sessionId,
+      title: memory.title,
       note: memory.note,
       hangoutAt: toIso(memory.windowStartsAt),
       windowStartsAt: toIso(memory.windowStartsAt),
@@ -1551,6 +1553,7 @@ export function createNeonStore(databaseUrl: string): Store {
         result.push({
           id: memory.id,
           sessionId: memory.sessionId,
+          title: memory.title,
           hangoutAt: toIso(memory.windowStartsAt),
           lockedAt: toIso(memory.lockedAt ?? memory.windowExpiresAt),
           memberDisplayNames: memberRows.map(({ user }) => user.displayName),
@@ -1645,6 +1648,15 @@ export function createNeonStore(databaseUrl: string): Store {
       const [row] = await db
         .update(schema.memories)
         .set({ note })
+        .where(eq(schema.memories.id, memoryId))
+        .returning();
+      return row ? mapMemory(row) : null;
+    },
+
+    async updateMemoryTitle(memoryId, title) {
+      const [row] = await db
+        .update(schema.memories)
+        .set({ title })
         .where(eq(schema.memories.id, memoryId))
         .returning();
       return row ? mapMemory(row) : null;

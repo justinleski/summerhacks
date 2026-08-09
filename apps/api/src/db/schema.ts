@@ -232,6 +232,8 @@ export const memories = pgTable("memories", {
     .unique(),
   /** `open` | `locked` | `expired` */
   status: text("status").notNull().default("open"),
+  /** Member-editable display name for the memory; length capped in Zod, not here. */
+  title: text("title"),
   note: text("note"),
   windowStartsAt: timestamp("window_starts_at", { withTimezone: true }).notNull(),
   windowExpiresAt: timestamp("window_expires_at", {
