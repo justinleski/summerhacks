@@ -1,7 +1,7 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { lazy, Suspense, type FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { BootstrapResponse, Session } from "@summerhacks/shared";
-import { BumpMode } from "../features/bump/BumpMode";
+import { OceanShaderCanvas } from "../components/ambient/OceanShaderCanvas";
 import { RecentSessions } from "../features/session/RecentSessions";
 import {
   api,
@@ -17,6 +17,10 @@ import {
   getNeonSessionUser,
   neonAuthEnabled,
 } from "../lib/neonAuth";
+
+const BumpMode = lazy(() =>
+  import("../features/bump/BumpMode").then((m) => ({ default: m.BumpMode })),
+);
 
 export function HomePage() {
   const [ready, setReady] = useState(Boolean(getToken()));
@@ -133,12 +137,14 @@ export function HomePage() {
 
   if (bumpOpen) {
     return (
-      <BumpMode
-        onClose={() => {
-          setBumpOpen(false);
-          loadSessions().catch(() => undefined);
-        }}
-      />
+      <Suspense fallback={<div className="route-loading">Loading…</div>}>
+        <BumpMode
+          onClose={() => {
+            setBumpOpen(false);
+            loadSessions().catch(() => undefined);
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -154,6 +160,7 @@ export function HomePage() {
   if (!ready) {
     return (
       <main className="page home-hero">
+        <OceanShaderCanvas />
         <p className="brand">Summerhacks</p>
         <h1>Bump to connect</h1>
         <p className="lede">
@@ -226,14 +233,6 @@ export function HomePage() {
           </button>
         </div>
       </header>
-
-      <nav className="home-nav" aria-label="Primary">
-        <Link to="/friends">Friends</Link>
-        <Link to="/calendar">Calendar</Link>
-        <Link to="/map">Map</Link>
-        <Link to="/explore">Explore</Link>
-        <Link to="/profile">Profile</Link>
-      </nav>
 
       {error && <p className="error">{error}</p>}
       <RecentSessions sessions={sessions} />

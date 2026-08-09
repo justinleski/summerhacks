@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Session } from "@summerhacks/shared";
 import { api } from "../../lib/api";
+import { useAmbientIntensity } from "../../lib/ambient";
 import { useAccelerometerBump } from "./useAccelerometerBump";
 import { useBumpHaptics, vibrateConfirm } from "./useBumpHaptics";
 import { useBumpSearch } from "./useBumpSearch";
@@ -18,6 +19,7 @@ const THRESHOLD = 16;
 
 export function BumpMode({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
+  useAmbientIntensity("off");
   const [phase, setPhase] = useState<Phase>("idle");
   const { bump, error, startSearch, cancel } = useBumpSearch();
   const [confirming, setConfirming] = useState(false);

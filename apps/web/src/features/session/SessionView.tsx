@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Session } from "@summerhacks/shared";
+import { OceanShaderCanvas } from "../../components/ambient/OceanShaderCanvas";
 import { api } from "../../lib/api";
 
 export function SessionView() {
@@ -36,6 +37,7 @@ export function SessionView() {
 
   return (
     <main className="page session-page">
+      <OceanShaderCanvas />
       <p className="eyebrow">Shared session</p>
       <h1>Connected</h1>
       <p className="lede">

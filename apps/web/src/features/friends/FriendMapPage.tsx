@@ -6,7 +6,7 @@ import type { FriendMapResponse } from "@summerhacks/shared";
 import { api } from "../../lib/api";
 import {
   CARTO_ATTRIBUTION,
-  CARTO_LIGHT_URL,
+  currentCartoTileUrl,
   friendCheckinIcon,
 } from "../map/mapConfig";
 
@@ -74,7 +74,7 @@ export function FriendMapPage() {
             scrollWheelZoom
             style={{ height: "100%", width: "100%" }}
           >
-            <TileLayer url={CARTO_LIGHT_URL} attribution={CARTO_ATTRIBUTION} />
+            <TileLayer url={currentCartoTileUrl()} attribution={CARTO_ATTRIBUTION} />
             {data.checkins.map((c) => (
               <Marker
                 key={c.id}

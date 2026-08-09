@@ -1,29 +1,68 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { CalendarPage } from "./features/calendar/CalendarPage";
-import { EventDetailPage } from "./features/calendar/EventDetailPage";
-import { ExplorePage } from "./features/explore/ExplorePage";
-import { FriendMapPage } from "./features/friends/FriendMapPage";
-import { FriendsPage } from "./features/friends/FriendsPage";
-import { MapPage } from "./features/map/MapPage";
-import { ProfilePage } from "./features/profile/ProfilePage";
-import { SessionView } from "./features/session/SessionView";
-import { HomePage } from "./pages/HomePage";
+import { AppShell } from "./components/layout/AppShell";
+
+const HomePage = lazy(() =>
+  import("./pages/HomePage").then((m) => ({ default: m.HomePage })),
+);
+const CalendarPage = lazy(() =>
+  import("./features/calendar/CalendarPage").then((m) => ({
+    default: m.CalendarPage,
+  })),
+);
+const EventDetailPage = lazy(() =>
+  import("./features/calendar/EventDetailPage").then((m) => ({
+    default: m.EventDetailPage,
+  })),
+);
+const ExplorePage = lazy(() =>
+  import("./features/explore/ExplorePage").then((m) => ({
+    default: m.ExplorePage,
+  })),
+);
+const FriendMapPage = lazy(() =>
+  import("./features/friends/FriendMapPage").then((m) => ({
+    default: m.FriendMapPage,
+  })),
+);
+const FriendsPage = lazy(() =>
+  import("./features/friends/FriendsPage").then((m) => ({
+    default: m.FriendsPage,
+  })),
+);
+const MapPage = lazy(() =>
+  import("./features/map/MapPage").then((m) => ({ default: m.MapPage })),
+);
+const ProfilePage = lazy(() =>
+  import("./features/profile/ProfilePage").then((m) => ({
+    default: m.ProfilePage,
+  })),
+);
+const SessionView = lazy(() =>
+  import("./features/session/SessionView").then((m) => ({
+    default: m.SessionView,
+  })),
+);
 
 export function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/explore" element={<ExplorePage />} />
-        <Route path="/friends" element={<FriendsPage />} />
-        <Route path="/friends/:friendId/map" element={<FriendMapPage />} />
-        <Route path="/calendar" element={<CalendarPage />} />
-        <Route path="/events/:id" element={<EventDetailPage />} />
-        <Route path="/map" element={<MapPage />} />
-        <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/session/:id" element={<SessionView />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<div className="route-loading">Loading…</div>}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/explore" element={<ExplorePage />} />
+            <Route path="/friends" element={<FriendsPage />} />
+            <Route path="/friends/:friendId/map" element={<FriendMapPage />} />
+            <Route path="/calendar" element={<CalendarPage />} />
+            <Route path="/events/:id" element={<EventDetailPage />} />
+            <Route path="/map" element={<MapPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/session/:id" element={<SessionView />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }
