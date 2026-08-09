@@ -46,7 +46,7 @@ Photo-sharing direction long-term; **MVP is Bump only** (not full feed, not coll
 - Root `package.json`: **`"type": "module"`** (required so Vercel loads `api/index.js` as ESM)
 - Deploy: **Vercel** — static web + serverless `api/index.ts` + rewrite `/api/(.*)` → `/api`
 - DB: **Neon Postgres** + Drizzle (`apps/api/src/db/schema.ts`, `neon-store.ts`)
-- Auth MVP: Neon Auth (Google shared credentials; GitHub with Console OAuth app) + guest bootstrap fallback; API verifies JWT via JWKS then maps to `users.auth_user_id`
+- Auth MVP: Neon Auth (Google shared credentials; GitHub with Console OAuth app; email+password with OTP verify via Neon mail) + guest bootstrap fallback; API verifies JWT via JWKS then maps to `users.auth_user_id`
 - Match notify MVP: **short polling** in Bump Mode only (~500ms, ≤8s) — not WebSockets
 - CLI: `vercel` is a root **devDependency** (`npm run deploy` / `deploy:prod`)
 

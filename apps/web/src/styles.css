@@ -173,6 +173,18 @@ button.oauth {
   font-size: 0.9rem;
 }
 
+.email-auth .linkish {
+  justify-self: start;
+  padding-left: 0;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.email-auth strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 input {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -498,6 +510,12 @@ html[data-theme="light"] .members li {
   flex-wrap: wrap;
 }
 
+.profile-avatar-actions {
+  display: grid;
+  gap: 0.65rem;
+  align-content: start;
+}
+
 .avatar-lg {
   width: 88px;
   height: 88px;
@@ -523,6 +541,184 @@ html[data-theme="light"] .members li {
 
 .file-label input[type="file"] {
   font-size: 0.85rem;
+}
+
+.pixel-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: stretch;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0)
+    env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+  background:
+    radial-gradient(900px 500px at 20% 0%, #2f5a44 0%, transparent 55%),
+    linear-gradient(160deg, var(--bg0), var(--bg1) 50%, #10241c);
+  overflow: auto;
+}
+
+html[data-theme="light"] .pixel-editor-overlay {
+  background:
+    radial-gradient(900px 500px at 10% 0%, #c8ddc8 0%, transparent 55%),
+    linear-gradient(160deg, var(--bg0), var(--bg1) 50%, #dfeae2);
+}
+
+.pixel-editor {
+  width: min(28rem, 100%);
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 2.5rem;
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+  min-height: 100%;
+}
+
+.pixel-editor__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.pixel-editor__head h2 {
+  margin: 0.15rem 0 0;
+}
+
+.pixel-editor__hint {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.pixel-editor__canvas {
+  width: min(100%, 20rem);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  grid-template-rows: repeat(16, 1fr);
+  border: 2px solid var(--border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  background:
+    repeating-conic-gradient(
+        rgba(243, 240, 230, 0.08) 0% 25%,
+        transparent 0% 50%
+      )
+      0 0 / 12.5% 12.5%;
+  cursor: crosshair;
+}
+
+html[data-theme="light"] .pixel-editor__canvas {
+  background:
+    repeating-conic-gradient(
+        rgba(20, 32, 22, 0.08) 0% 25%,
+        transparent 0% 50%
+      )
+      0 0 / 12.5% 12.5%;
+}
+
+.pixel-editor__cell {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.pixel-editor__cell--empty {
+  background: transparent;
+}
+
+.pixel-editor__tools {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.pixel-editor__palette {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 0.4rem;
+  max-width: 20rem;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.pixel-swatch {
+  aspect-ratio: 1;
+  border-radius: 0.4rem;
+  border: 2px solid transparent;
+  padding: 0;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.pixel-swatch--empty {
+  background:
+    repeating-conic-gradient(
+        rgba(243, 240, 230, 0.2) 0% 25%,
+        transparent 0% 50%
+      )
+      0 0 / 50% 50%;
+}
+
+html[data-theme="light"] .pixel-swatch--empty {
+  background:
+    repeating-conic-gradient(
+        rgba(20, 32, 22, 0.15) 0% 25%,
+        transparent 0% 50%
+      )
+      0 0 / 50% 50%;
+}
+
+.pixel-swatch--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.pixel-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.pixel-editor__actions-right {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  z-index: 50;
+  transform: translateX(-50%);
+  max-width: min(90vw, 22rem);
+  padding: 0.75rem 1.15rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  font-size: 0.95rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  animation: toast-in 0.28s ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(0.6rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 @media (max-width: 640px) {

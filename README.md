@@ -80,7 +80,7 @@ Full map: [docs/deploy-vercel.md](docs/deploy-vercel.md).
 - [Matching + haptics](docs/bump/matching.md)
 - [Architecture](docs/bump/architecture.md)
 - [API](docs/bump/api.md) · [Data model](docs/bump/data-model.md)
-- [Neon Auth (Google / GitHub)](docs/auth-neon.md)
+- [Neon Auth (Google / GitHub / Email OTP)](docs/auth-neon.md)
 - [Vercel + Neon (two-device demos)](docs/deploy-vercel.md)
 - [Docs index](docs/README.md)
 - [Agent briefing](.context/features/bump/BRIEFING.md) · [spec](.context/features/bump/spec.yaml)

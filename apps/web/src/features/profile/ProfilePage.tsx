@@ -21,6 +21,7 @@ import {
   setTheme,
   type ThemeMode,
 } from "../../lib/theme";
+import { PixelAvatarEditor } from "./PixelAvatarEditor";
 
 export function ProfilePage() {
   const navigate = useNavigate();
@@ -31,6 +32,8 @@ export function ProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [pixelOpen, setPixelOpen] = useState(false);
 
   const load = useCallback(async () => {
     const me = await api<MeProfile>("/users/me");
@@ -68,8 +71,7 @@ export function ProfilePage() {
     }
   }
 
-  async function onAvatar(file: File | null) {
-    if (!file) return;
+  async function applyAvatar(file: File) {
     setBusy(true);
     setError(null);
     try {
@@ -80,10 +82,23 @@ export function ProfilePage() {
       });
       setProfile(updated);
       setSaved(true);
+      setPixelOpen(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Avatar upload failed");
+      throw err;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyFriendCode() {
+    if (!profile?.friendCode) return;
+    try {
+      await navigator.clipboard.writeText(profile.friendCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError("Could not copy code");
     }
   }
 
@@ -110,7 +125,7 @@ export function ProfilePage() {
     <main className="page profile-page">
       <p className="eyebrow">You</p>
       <h1>Profile</h1>
-      <p className="lede">Photo, bio, theme, and sign out.</p>
+      <p className="lede">Avatar, bio, theme, and sign out.</p>
 
       {error && <p className="error">{error}</p>}
       {saved && <p className="muted">Saved.</p>}
@@ -123,15 +138,16 @@ export function ProfilePage() {
             {(displayName || "?").slice(0, 1).toUpperCase()}
           </div>
         )}
-        <label className="file-label">
-          Change photo
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
+        <div className="profile-avatar-actions">
+          <button
+            type="button"
+            className="secondary"
             disabled={busy}
-            onChange={(e) => void onAvatar(e.target.files?.[0] ?? null)}
-          />
-        </label>
+            onClick={() => setPixelOpen(true)}
+          >
+            {profile?.avatarUrl ? "Edit pixel avatar" : "Draw avatar"}
+          </button>
+        </div>
       </section>
 
       <form className="stack-form" onSubmit={save}>
@@ -158,9 +174,17 @@ export function ProfilePage() {
           </span>
         </label>
         {profile?.friendCode && (
-          <p className="muted">
-            Friend code: <code className="friend-code">{profile.friendCode}</code>
-          </p>
+          <div className="friend-code-row">
+            <span className="muted">Friend code</span>
+            <code className="friend-code">{profile.friendCode}</code>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void copyFriendCode()}
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
         )}
         <button type="submit" className="primary" disabled={busy}>
           Save profile
@@ -184,6 +208,13 @@ export function ProfilePage() {
       <Link className="text-link" to="/">
         ← Home
       </Link>
+
+      <PixelAvatarEditor
+        open={pixelOpen}
+        busy={busy}
+        onCancel={() => setPixelOpen(false)}
+        onSave={applyAvatar}
+      />
     </main>
   );
 }

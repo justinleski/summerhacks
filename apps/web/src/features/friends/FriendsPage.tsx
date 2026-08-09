@@ -101,7 +101,7 @@ export function FriendsPage() {
           <div className="friend-code-row">
             <code className="friend-code">{me.friendCode}</code>
             <button type="button" className="secondary" onClick={() => void copyCode()}>
-              {copied ? "Copied" : "Copy"}
+              {copied ? "Copied!" : "Copy"}
             </button>
           </div>
         ) : (
